@@ -9,20 +9,23 @@ app = Flask(__name__, static_folder="static")
 
 
 def get_fortigate_session(host, token):
-    """Create a session config for FortiGate API calls."""
+    """Create a requests.Session with connection pooling for FortiGate API calls."""
+    s = requests.Session()
+    s.headers.update({"Authorization": f"Bearer {token}"})
+    s.verify = False
+    # Increase connection pool for parallel requests
+    adapter = requests.adapters.HTTPAdapter(pool_connections=16, pool_maxsize=16)
+    s.mount("https://", adapter)
     return {
         "base_url": f"https://{host}/api/v2",
-        "headers": {"Authorization": f"Bearer {token}"},
-        "verify": False,
+        "session": s,
     }
 
 
 def fgt_get(session, path, params=None):
     """Perform a GET request against the FortiGate API."""
     url = f"{session['base_url']}{path}"
-    resp = requests.get(
-        url, headers=session["headers"], params=params, verify=session["verify"], timeout=30
-    )
+    resp = session["session"].get(url, params=params, timeout=30)
     resp.raise_for_status()
     return resp.json()
 
@@ -94,51 +97,59 @@ def diagnose_single_host(host, token, vdom):
             key = (t.get("fortiswitch_id", ""), t.get("port", ""))
             transceiver_map[key] = t
 
-        results = []
+        # Collect all fiber port fetch jobs across all switches
+        all_fetch_jobs = []  # (switch_serial, port, transceiver_info)
+        switch_info = {}  # switch_serial -> switch metadata
 
         for sw in switches:
-            switch_id = sw.get("switch-id", sw.get("serial", ""))
             switch_serial = sw.get("serial", "")
-            switch_name = sw.get("name", switch_id)
-            switch_status = sw.get("status", "")
-            os_version = sw.get("os_version", "")
+            switch_info[switch_serial] = {
+                "switch_id": sw.get("switch-id", sw.get("serial", "")),
+                "name": sw.get("name", sw.get("switch-id", switch_serial)),
+                "status": sw.get("status", ""),
+                "os_version": sw.get("os_version", ""),
+            }
 
-            # Find fiber ports
             fiber_ports = [
                 t.get("port") for t in transceivers
                 if t.get("fortiswitch_id") == switch_serial
             ]
+            for port in fiber_ports:
+                all_fetch_jobs.append((switch_serial, port, transceiver_map.get((switch_serial, port), {})))
 
-            if not fiber_ports:
-                continue
-
-            # Step 3: Fetch Tx/Rx for all ports in parallel
-            port_diagnostics = []
-            with ThreadPoolExecutor(max_workers=min(8, len(fiber_ports))) as executor:
+        # Fetch ALL tx-rx data across all switches in one parallel batch
+        port_results = {}  # switch_serial -> [port_diagnostics]
+        if all_fetch_jobs:
+            with ThreadPoolExecutor(max_workers=min(16, len(all_fetch_jobs))) as executor:
                 futures = {
                     executor.submit(
-                        fetch_tx_rx, session, params, switch_serial, port,
-                        transceiver_map.get((switch_serial, port), {})
-                    ): port
-                    for port in fiber_ports
+                        fetch_tx_rx, session, params, serial, port, tinfo
+                    ): serial
+                    for serial, port, tinfo in all_fetch_jobs
                 }
                 for future in as_completed(futures):
-                    port_diagnostics.append(future.result())
+                    serial = futures[future]
+                    port_results.setdefault(serial, []).append(future.result())
 
-            # Sort ports by name for consistent ordering
+        # Build results
+        results = []
+        for switch_serial, info in switch_info.items():
+            port_diagnostics = port_results.get(switch_serial, [])
+            if not port_diagnostics:
+                continue
+
             port_diagnostics.sort(key=lambda p: p.get("port", ""))
 
-            # Get health data for this switch
             health = health_map.get(switch_serial, {})
             summary = health.get("summary", {})
             temp_data = summary.get("temperature", {})
 
             results.append({
-                "switch_id": switch_id,
+                "switch_id": info["switch_id"],
                 "serial": switch_serial,
-                "name": switch_name,
-                "status": switch_status,
-                "os_version": os_version,
+                "name": info["name"],
+                "status": info["status"],
+                "os_version": info["os_version"],
                 "temperature": temp_data.get("value"),
                 "temperature_rating": temp_data.get("rating", ""),
                 "ports": port_diagnostics,
