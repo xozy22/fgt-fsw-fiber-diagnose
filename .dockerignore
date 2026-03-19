@@ -1,0 +1,17 @@
+.git
+.gitignore
+.claude
+.env
+__pycache__
+*.pyc
+*.egg-info
+dist
+build
+.venv
+venv
+docs
+*.json
+README.md
+Dockerfile
+.dockerignore
+.github

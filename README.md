@@ -28,17 +28,31 @@ Web-Tool zur Diagnose von Fiber-Transceiver-Ports auf FortiSwitch-Geräten, die 
 
 ## Installation
 
+### Option 1: Python
+
 ```bash
 git clone https://github.com/xozy22/fgt-fsw-fiber-diagnose.git
 cd fgt-fsw-fiber-diagnose
 pip install -r requirements.txt
-```
-
-## Starten
-
-```bash
 python app.py
 ```
+
+### Option 2: Docker
+
+```bash
+docker run -d -p 5000:5000 ghcr.io/xozy22/fgt-fsw-fiber-diagnose:latest
+```
+
+Oder selbst bauen:
+
+```bash
+git clone https://github.com/xozy22/fgt-fsw-fiber-diagnose.git
+cd fgt-fsw-fiber-diagnose
+docker build -t fgt-fsw-fiber-diagnose .
+docker run -d -p 5000:5000 fgt-fsw-fiber-diagnose
+```
+
+Das Docker-Image wird bei jedem Push auf `main` automatisch via GitHub Actions gebaut und in die **GitHub Container Registry** (`ghcr.io`) gepusht.
 
 Anschließend im Browser öffnen: **http://127.0.0.1:5000**
 
