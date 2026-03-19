@@ -1,0 +1,1080 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FortiSwitch Fiber Diagnose</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --surface: #1e293b;
+            --surface2: #334155;
+            --border: #475569;
+            --text: #e2e8f0;
+            --text-muted: #94a3b8;
+            --accent: #3b82f6;
+            --accent-hover: #2563eb;
+            --green: #22c55e;
+            --yellow: #eab308;
+            --red: #ef4444;
+            --orange: #f97316;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+
+        .header {
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            padding: 1rem 2rem;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .header h1 { font-size: 1.25rem; font-weight: 600; }
+        .header .subtitle { color: var(--text-muted); font-size: 0.875rem; }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 1.5rem;
+        }
+
+        /* --- Host List Panel --- */
+        .host-panel {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem 1.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .host-panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 0.75rem;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+
+        .host-panel-header h2 {
+            font-size: 0.875rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+        }
+
+        .host-actions {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            background: var(--accent);
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            padding: 0.5rem 1.5rem;
+            font-size: 0.875rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.15s;
+            white-space: nowrap;
+            height: fit-content;
+        }
+
+        .btn:hover { background: var(--accent-hover); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .btn-sm {
+            padding: 0.375rem 0.75rem;
+            font-size: 0.75rem;
+        }
+
+        .btn-secondary {
+            background: var(--surface2);
+            color: var(--text);
+        }
+
+        .btn-secondary:hover { background: var(--border); }
+
+        .btn-danger {
+            background: transparent;
+            color: var(--red);
+            border: 1px solid var(--red);
+        }
+
+        .btn-danger:hover { background: rgba(239, 68, 68, 0.15); }
+
+        .btn-success {
+            background: var(--green);
+        }
+
+        .btn-success:hover { background: #16a34a; }
+
+        .host-table-wrap {
+            overflow-x: auto;
+        }
+
+        .host-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.8125rem;
+        }
+
+        .host-table th {
+            padding: 0.5rem 0.75rem;
+            text-align: left;
+            font-weight: 600;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            border-bottom: 1px solid var(--border);
+            background: var(--bg);
+        }
+
+        .host-table td {
+            padding: 0.5rem 0.75rem;
+            border-bottom: 1px solid rgba(71, 85, 105, 0.3);
+            vertical-align: middle;
+        }
+
+        .host-table tbody tr:hover {
+            background: rgba(59, 130, 246, 0.05);
+        }
+
+        .host-table input[type="text"],
+        .host-table input[type="password"] {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 0.3rem 0.5rem;
+            color: var(--text);
+            font-size: 0.8125rem;
+            outline: none;
+            width: 100%;
+            min-width: 100px;
+        }
+
+        .host-table input:focus { border-color: var(--accent); }
+        .host-table input::placeholder { color: var(--text-muted); }
+
+        .host-table .col-actions { width: 140px; text-align: center; white-space: nowrap; }
+        .host-table .col-check { width: 40px; text-align: center; }
+
+        .action-btns {
+            display: flex;
+            gap: 0.375rem;
+            justify-content: center;
+        }
+
+        .host-empty {
+            text-align: center;
+            padding: 1.5rem;
+            color: var(--text-muted);
+            font-size: 0.8125rem;
+        }
+
+        /* --- Status Bar --- */
+        .status-bar {
+            margin-top: 1rem;
+            padding: 0.75rem 1rem;
+            border-radius: 6px;
+            font-size: 0.875rem;
+            display: none;
+        }
+
+        .status-bar.error {
+            display: block;
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid var(--red);
+            color: var(--red);
+        }
+
+        .status-bar.loading {
+            display: block;
+            background: rgba(59, 130, 246, 0.15);
+            border: 1px solid var(--accent);
+            color: var(--accent);
+        }
+
+        .status-bar.success {
+            display: block;
+            background: rgba(34, 197, 94, 0.15);
+            border: 1px solid var(--green);
+            color: var(--green);
+        }
+
+        .results { margin-top: 1.5rem; }
+
+        .switch-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            overflow: hidden;
+        }
+
+        .switch-header {
+            padding: 1rem 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            cursor: pointer;
+            user-select: none;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .switch-header:hover { background: var(--surface2); }
+
+        .switch-header .arrow {
+            transition: transform 0.2s;
+            color: var(--text-muted);
+        }
+
+        .switch-header .arrow.open { transform: rotate(90deg); }
+        .switch-header .switch-info { flex: 1; }
+        .switch-header .switch-name { font-weight: 600; font-size: 1rem; }
+
+        .switch-header .switch-meta {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-top: 0.25rem;
+        }
+
+        .switch-header .port-count {
+            background: var(--surface2);
+            border-radius: 12px;
+            padding: 0.25rem 0.75rem;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        .fgt-label {
+            background: var(--accent);
+            border-radius: 4px;
+            padding: 0.125rem 0.5rem;
+            font-size: 0.7rem;
+            color: #fff;
+            font-weight: 600;
+            margin-left: 0.5rem;
+        }
+
+        .switch-body { display: none; padding: 0; }
+        .switch-body.open { display: block; }
+
+        .port-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.8125rem;
+        }
+
+        .port-table thead { background: var(--bg); }
+
+        .port-table th {
+            padding: 0.625rem 1rem;
+            text-align: left;
+            font-weight: 600;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .port-table td {
+            padding: 0.625rem 1rem;
+            border-bottom: 1px solid rgba(71, 85, 105, 0.4);
+            vertical-align: middle;
+        }
+
+        .port-table tbody tr:hover { background: rgba(59, 130, 246, 0.05); }
+        .port-table tbody tr:last-child td { border-bottom: none; }
+
+        .status-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 0.5rem;
+        }
+
+        .status-dot.up { background: var(--green); }
+        .status-dot.down { background: var(--red); }
+        .status-dot.unknown { background: var(--text-muted); }
+
+        .power-value {
+            font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+            font-size: 0.8125rem;
+        }
+
+        .power-bar { display: flex; align-items: center; gap: 0.5rem; }
+
+        .power-bar-track {
+            flex: 1;
+            height: 6px;
+            background: var(--bg);
+            border-radius: 3px;
+            position: relative;
+            min-width: 80px;
+            max-width: 150px;
+        }
+
+        .power-bar-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.3s;
+        }
+
+        .level-ok { color: var(--green); }
+        .level-warn { color: var(--yellow); }
+        .level-alarm { color: var(--red); }
+
+        .bar-ok { background: var(--green); }
+        .bar-warn { background: var(--yellow); }
+        .bar-alarm { background: var(--red); }
+
+        .vendor-info { color: var(--text-muted); font-size: 0.75rem; }
+
+        .no-results {
+            text-align: center;
+            padding: 3rem;
+            color: var(--text-muted);
+        }
+
+        /* --- Filter Bar --- */
+        .filter-bar {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 0.75rem 1rem;
+            margin-top: 1rem;
+            display: none;
+            gap: 0.75rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .filter-bar.visible { display: flex; }
+
+        .filter-bar label {
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            margin-right: 0.25rem;
+        }
+
+        .filter-bar input[type="text"] {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 0.375rem 0.625rem;
+            color: var(--text);
+            font-size: 0.8125rem;
+            outline: none;
+            flex: 1;
+            min-width: 180px;
+        }
+
+        .filter-bar input[type="text"]:focus { border-color: var(--accent); }
+        .filter-bar input[type="text"]::placeholder { color: var(--text-muted); }
+
+        .filter-group {
+            display: flex;
+            align-items: center;
+            gap: 0.375rem;
+        }
+
+        .filter-bar select {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 0.375rem 0.5rem;
+            color: var(--text);
+            font-size: 0.8125rem;
+            outline: none;
+            cursor: pointer;
+        }
+
+        .filter-bar select:focus { border-color: var(--accent); }
+
+        .filter-count {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-left: auto;
+            white-space: nowrap;
+        }
+
+        .port-row-hidden { display: none !important; }
+        .switch-card-hidden { display: none !important; }
+
+        input[type="file"] { display: none; }
+
+        @media (max-width: 900px) {
+            .host-panel-header { flex-direction: column; align-items: flex-start; }
+            .port-table { font-size: 0.75rem; }
+            .port-table th, .port-table td { padding: 0.5rem; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div>
+            <h1>FortiSwitch Fiber Diagnose</h1>
+            <div class="subtitle">Transceiver Tx/Rx Leistungswerte via FortiLink</div>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Host List Panel -->
+        <div class="host-panel">
+            <div class="host-panel-header">
+                <h2>FortiGate Hosts</h2>
+                <div class="host-actions">
+                    <button class="btn btn-sm btn-secondary" onclick="addHostRow()">+ Host</button>
+                    <button class="btn btn-sm btn-secondary" onclick="document.getElementById('csvInput').click()">CSV Import</button>
+                    <button class="btn btn-sm btn-secondary" onclick="exportCsv()">CSV Export</button>
+                    <button class="btn btn-sm btn-secondary" onclick="saveHosts()">Speichern</button>
+                    <button class="btn btn-sm btn-secondary" onclick="loadHosts()">Laden</button>
+                    <input type="file" id="csvInput" accept=".csv,.txt" onchange="importCsv(event)" />
+                    <button class="btn btn-sm btn-success" onclick="diagnoseAll()">Alle abfragen</button>
+                    <button class="btn btn-sm" onclick="diagnoseSelected()">Auswahl abfragen</button>
+                </div>
+            </div>
+            <div class="host-table-wrap">
+                <table class="host-table">
+                    <thead>
+                        <tr>
+                            <th class="col-check"><input type="checkbox" id="selectAll" onchange="toggleSelectAll(this)" /></th>
+                            <th>Host</th>
+                            <th>API Token</th>
+                            <th>VDOM</th>
+                            <th class="col-actions">Aktionen</th>
+                        </tr>
+                    </thead>
+                    <tbody id="hostTableBody"></tbody>
+                </table>
+                <div class="host-empty" id="hostEmpty">
+                    Keine Hosts konfiguriert. Host hinzufügen oder CSV importieren.
+                </div>
+            </div>
+        </div>
+
+        <div class="status-bar" id="statusBar"></div>
+
+        <div class="filter-bar" id="filterBar">
+            <input type="text" id="filterText" placeholder="Suche (Switch, Port, Vendor, S/N...)" oninput="applyFilters()" />
+            <div class="filter-group">
+                <label>Status</label>
+                <select id="filterStatus" onchange="applyFilters()">
+                    <option value="">Alle</option>
+                    <option value="up">Up / OK</option>
+                    <option value="down">Down / Error</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Level</label>
+                <select id="filterLevel" onchange="applyFilters()">
+                    <option value="">Alle</option>
+                    <option value="ok">OK</option>
+                    <option value="warn">Warning</option>
+                    <option value="alarm">Alarm</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Vendor</label>
+                <select id="filterVendor" onchange="applyFilters()">
+                    <option value="">Alle</option>
+                </select>
+            </div>
+            <span class="filter-count" id="filterCount"></span>
+        </div>
+
+        <div class="results" id="results"></div>
+    </div>
+
+    <script>
+        let hosts = [];
+        let hostIdCounter = 0;
+
+        // --- Host Management ---
+
+        function addHostRow(host = '', token = '', vdom = 'root') {
+            syncHostValues();
+            hosts.push({ id: ++hostIdCounter, host, token, vdom });
+            renderHostTable();
+        }
+
+        function removeHost(id) {
+            syncHostValues();
+            hosts = hosts.filter(h => h.id !== id);
+            renderHostTable();
+        }
+
+        function syncHostValues() {
+            hosts.forEach(h => {
+                const row = document.querySelector(`tr[data-id="${h.id}"]`);
+                if (row) {
+                    h.host = row.querySelector('.inp-host').value.trim();
+                    h.token = row.querySelector('.inp-token').value.trim();
+                    h.vdom = row.querySelector('.inp-vdom').value.trim() || 'root';
+                }
+            });
+        }
+
+        function getHostValues() {
+            syncHostValues();
+            return hosts;
+        }
+
+        function renderHostTable() {
+            const tbody = document.getElementById('hostTableBody');
+            const empty = document.getElementById('hostEmpty');
+            empty.style.display = hosts.length === 0 ? 'block' : 'none';
+
+            tbody.innerHTML = '';
+            hosts.forEach(h => {
+                const tr = document.createElement('tr');
+                tr.dataset.id = h.id;
+                tr.innerHTML = `
+                    <td class="col-check"><input type="checkbox" class="host-check" /></td>
+                    <td><input type="text" class="inp-host" value="${escAttr(h.host)}" placeholder="192.168.1.1" /></td>
+                    <td><input type="password" class="inp-token" value="${escAttr(h.token)}" placeholder="API Token" /></td>
+                    <td><input type="text" class="inp-vdom" value="${escAttr(h.vdom)}" placeholder="root" style="max-width:120px" /></td>
+                    <td class="col-actions">
+                        <div class="action-btns">
+                            <button class="btn btn-sm" onclick="diagnoseSingle(${h.id})">Abfragen</button>
+                            <button class="btn btn-sm btn-danger" onclick="removeHost(${h.id})">&#10005;</button>
+                        </div>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function toggleSelectAll(cb) {
+            document.querySelectorAll('.host-check').forEach(c => c.checked = cb.checked);
+        }
+
+        function getSelectedHostIds() {
+            const ids = [];
+            document.querySelectorAll('#hostTableBody tr').forEach(tr => {
+                if (tr.querySelector('.host-check')?.checked) {
+                    ids.push(parseInt(tr.dataset.id));
+                }
+            });
+            return ids;
+        }
+
+        // --- CSV Import / Export ---
+
+        function importCsv(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const text = e.target.result;
+                parseCsv(text);
+            };
+            reader.readAsText(file);
+            event.target.value = '';
+        }
+
+        function parseCsv(text) {
+            const lines = text.split(/\r?\n/).filter(l => l.trim());
+            let added = 0;
+
+            for (const line of lines) {
+                // Skip header line
+                if (/^host[,;].*token/i.test(line)) continue;
+
+                const parts = line.split(/[,;]/).map(s => s.trim().replace(/^["']|["']$/g, ''));
+                if (parts.length >= 2 && parts[0] && parts[1]) {
+                    const host = parts[0];
+                    const token = parts[1];
+                    const vdom = parts[2] || 'root';
+                    hosts.push({ id: ++hostIdCounter, host, token, vdom });
+                    added++;
+                }
+            }
+
+            renderHostTable();
+            showStatus(`${added} Host(s) aus CSV importiert.`, 'success');
+        }
+
+        function exportCsv() {
+            getHostValues();
+            if (hosts.length === 0) {
+                showStatus('Keine Hosts zum Exportieren.', 'error');
+                return;
+            }
+
+            let csv = 'host;token;vdom\n';
+            hosts.forEach(h => {
+                csv += `${csvEscape(h.host)};${csvEscape(h.token)};${csvEscape(h.vdom)}\n`;
+            });
+
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'fortigate_hosts.csv';
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        function csvEscape(val) {
+            if (!val) return '';
+            if (val.includes(';') || val.includes('"') || val.includes('\n')) {
+                return '"' + val.replace(/"/g, '""') + '"';
+            }
+            return val;
+        }
+
+        // --- Save / Load (localStorage) ---
+
+        const STORAGE_KEY = 'fgt_fiber_hosts';
+
+        function saveHosts() {
+            getHostValues();
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(hosts.map(h => ({
+                host: h.host, token: h.token, vdom: h.vdom
+            }))));
+            showStatus(`${hosts.length} Host(s) gespeichert.`, 'success');
+        }
+
+        function loadHosts() {
+            const data = localStorage.getItem(STORAGE_KEY);
+            if (!data) {
+                showStatus('Keine gespeicherten Hosts gefunden.', 'error');
+                return;
+            }
+
+            try {
+                const arr = JSON.parse(data);
+                hosts = arr.map(h => ({
+                    id: ++hostIdCounter,
+                    host: h.host || '',
+                    token: h.token || '',
+                    vdom: h.vdom || 'root'
+                }));
+                renderHostTable();
+                showStatus(`${hosts.length} Host(s) geladen.`, 'success');
+            } catch (e) {
+                showStatus('Fehler beim Laden der gespeicherten Daten.', 'error');
+            }
+        }
+
+        // --- Diagnose ---
+
+        async function diagnoseSingle(id) {
+            getHostValues();
+            const host = hosts.find(h => h.id === id);
+            if (!host || !host.host || !host.token) {
+                showStatus('Host und API-Token sind erforderlich.', 'error');
+                return;
+            }
+            await runDiagnoseForHosts([host]);
+        }
+
+        async function diagnoseSelected() {
+            getHostValues();
+            const ids = getSelectedHostIds();
+            if (ids.length === 0) {
+                showStatus('Bitte mindestens einen Host auswählen.', 'error');
+                return;
+            }
+            const selected = hosts.filter(h => ids.includes(h.id));
+            await runDiagnoseForHosts(selected);
+        }
+
+        async function diagnoseAll() {
+            getHostValues();
+            const valid = hosts.filter(h => h.host && h.token);
+            if (valid.length === 0) {
+                showStatus('Keine gültigen Hosts konfiguriert.', 'error');
+                return;
+            }
+            await runDiagnoseForHosts(valid);
+        }
+
+        async function runDiagnoseForHosts(hostList) {
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = '';
+            allResultData = [];
+            document.getElementById('filterBar').classList.remove('visible');
+            document.getElementById('filterText').value = '';
+            document.getElementById('filterStatus').value = '';
+            document.getElementById('filterLevel').value = '';
+            document.getElementById('filterVendor').value = '';
+
+            // Disable all buttons during query
+            document.querySelectorAll('.btn').forEach(b => b.disabled = true);
+            showStatus(`Abfrage von ${hostList.length} Host(s) läuft...`, 'loading');
+
+            let totalSwitches = 0;
+            let totalPorts = 0;
+            let errors = 0;
+
+            for (const h of hostList) {
+                try {
+                    const resp = await fetch('/api/diagnose', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ host: h.host, token: h.token, vdom: h.vdom })
+                    });
+
+                    const data = await resp.json();
+
+                    if (!resp.ok) {
+                        appendError(resultsDiv, h.host, data.error || 'Unbekannter Fehler');
+                        errors++;
+                        continue;
+                    }
+
+                    if (data.switches && data.switches.length > 0) {
+                        totalSwitches += data.switches.length;
+                        totalPorts += data.switches.reduce((s, sw) => s + sw.ports.length, 0);
+                        renderResults(data.switches, h.host, resultsDiv);
+                    } else {
+                        appendError(resultsDiv, h.host, 'Keine managed Switches mit Fiber-Ports gefunden.');
+                    }
+                } catch (e) {
+                    appendError(resultsDiv, h.host, 'Netzwerkfehler: ' + e.message);
+                    errors++;
+                }
+            }
+
+            document.querySelectorAll('.btn').forEach(b => b.disabled = false);
+
+            if (errors > 0 && totalSwitches === 0) {
+                showStatus(`Abfrage abgeschlossen mit ${errors} Fehler(n).`, 'error');
+            } else {
+                showStatus(
+                    `${totalSwitches} Switch(es) mit ${totalPorts} Fiber-Port(s) gefunden.` +
+                    (errors > 0 ? ` ${errors} Host(s) mit Fehlern.` : ''),
+                    totalSwitches > 0 ? 'success' : 'error'
+                );
+            }
+        }
+
+        function appendError(container, host, message) {
+            const div = document.createElement('div');
+            div.className = 'switch-card';
+            div.innerHTML = `
+                <div class="switch-header" style="cursor:default">
+                    <div class="switch-info">
+                        <div class="switch-name" style="color:var(--red)">${esc(host)}</div>
+                        <div class="switch-meta" style="color:var(--red)">${esc(message)}</div>
+                    </div>
+                </div>
+            `;
+            container.appendChild(div);
+        }
+
+        // --- UI Helpers ---
+
+        function showStatus(msg, type) {
+            const bar = document.getElementById('statusBar');
+            bar.className = 'status-bar ' + type;
+            bar.textContent = msg;
+        }
+
+        let allResultData = []; // { fgtHost, switches[] }
+
+        function renderResults(switches, fgtHost, container) {
+            allResultData.push({ fgtHost, switches });
+
+            switches.forEach(sw => {
+                const searchBase = [sw.name, sw.switch_id, sw.serial, sw.os_version, fgtHost].join(' ').toLowerCase();
+
+                const card = document.createElement('div');
+                card.className = 'switch-card';
+                card.dataset.searchbase = searchBase;
+
+                const header = document.createElement('div');
+                header.className = 'switch-header';
+                header.innerHTML = `
+                    <span class="arrow open">&#9654;</span>
+                    <div class="switch-info">
+                        <div class="switch-name">
+                            ${esc(sw.name || sw.switch_id)}
+                            <span class="fgt-label">${esc(fgtHost)}</span>
+                        </div>
+                        <div class="switch-meta">
+                            S/N: ${esc(sw.serial)} &middot; ID: ${esc(sw.switch_id)}
+                            ${sw.os_version ? ' &middot; FW: ' + esc(sw.os_version) : ''}
+                            ${sw.status ? ' &middot; ' + esc(sw.status) : ''}
+                        </div>
+                    </div>
+                    <span class="port-count">${sw.ports.length} Fiber-Port(s)</span>
+                `;
+
+                const body = document.createElement('div');
+                body.className = 'switch-body open';
+
+                header.addEventListener('click', () => {
+                    header.querySelector('.arrow').classList.toggle('open');
+                    body.classList.toggle('open');
+                });
+
+                body.innerHTML = buildPortTable(sw.ports);
+
+                card.appendChild(header);
+                card.appendChild(body);
+                container.appendChild(card);
+            });
+
+            updateVendorFilter();
+            document.getElementById('filterBar').classList.add('visible');
+        }
+
+        function buildPortTable(ports) {
+            let html = `<table class="port-table">
+                <thead>
+                    <tr>
+                        <th>Port</th>
+                        <th>Status</th>
+                        <th>Typ</th>
+                        <th>Vendor</th>
+                        <th>Part Number</th>
+                        <th>S/N</th>
+                        <th>Tx Power</th>
+                        <th>Rx Power</th>
+                    </tr>
+                </thead>
+                <tbody>`;
+
+            ports.forEach(p => {
+                if (p.error) {
+                    html += `<tr class="port-row" data-status="error" data-level="" data-vendor=""
+                                 data-search="${escAttr(p.port)}">
+                        <td>${esc(p.port)}</td>
+                        <td colspan="7" style="color:var(--red)">Fehler: ${esc(p.error)}</td>
+                    </tr>`;
+                    return;
+                }
+
+                const rawStatus = (p.link_status || '').toLowerCase();
+                const normalizedStatus = normalizeStatus(rawStatus);
+                const statusClass = normalizedStatus;
+
+                const txRx = p.tx_rx || {};
+                const limits = txRx.limits || {};
+                const statusArr = txRx.status || [];
+                const firstStatus = statusArr[0] || {};
+
+                const txPower = firstStatus['tx-power'] || {};
+                const rxPower = firstStatus['rx-power'] || {};
+
+                const txVal = txPower.value !== undefined ? parseFloat(txPower.value) : null;
+                const rxVal = rxPower.value !== undefined ? parseFloat(rxPower.value) : null;
+                const txLevel = txVal !== null ? getPowerLevel(txVal, limits, 'tx-power') : 'ok';
+                const rxLevel = rxVal !== null ? getPowerLevel(rxVal, limits, 'rx-power') : 'ok';
+                const worstLevel = (txLevel === 'alarm' || rxLevel === 'alarm') ? 'alarm'
+                                 : (txLevel === 'warn' || rxLevel === 'warn') ? 'warn' : 'ok';
+
+                const vendor = (p.vendor || '').trim();
+                const searchStr = [p.port, p.link_status, p.type, vendor, p.part_number, p.serial_number].join(' ').toLowerCase();
+
+                html += `<tr class="port-row" data-status="${escAttr(normalizedStatus)}"
+                             data-level="${escAttr(worstLevel)}" data-vendor="${escAttr(vendor)}"
+                             data-search="${escAttr(searchStr)}">
+                    <td><strong>${esc(p.port)}</strong></td>
+                    <td><span class="status-dot ${normalizedStatus}"></span>${esc(p.link_status || '-')}</td>
+                    <td>${esc(p.type || '-')}</td>
+                    <td>${esc(vendor || '-')}</td>
+                    <td class="vendor-info">${esc(p.part_number || '-')}</td>
+                    <td class="vendor-info">${esc(p.serial_number || '-')}</td>
+                    <td>${renderPowerCell(txPower, limits, 'tx-power')}</td>
+                    <td>${renderPowerCell(rxPower, limits, 'rx-power')}</td>
+                </tr>`;
+            });
+
+            html += '</tbody></table>';
+            return html;
+        }
+
+        function normalizeStatus(raw) {
+            if (!raw) return 'unknown';
+            const s = raw.toLowerCase();
+            if (s === 'up' || s === 'ok') return 'up';
+            if (s === 'down' || s.includes('error') || s.includes('fail') || s.includes('disconnect')) return 'down';
+            return 'unknown';
+        }
+
+        // --- Filters ---
+
+        function updateVendorFilter() {
+            const vendors = new Set();
+            document.querySelectorAll('.port-row').forEach(r => {
+                const v = r.dataset.vendor;
+                if (v) vendors.add(v);
+            });
+
+            const sel = document.getElementById('filterVendor');
+            const current = sel.value;
+            sel.innerHTML = '<option value="">Alle</option>';
+            [...vendors].sort().forEach(v => {
+                const opt = document.createElement('option');
+                opt.value = v;
+                opt.textContent = v;
+                sel.appendChild(opt);
+            });
+            sel.value = current;
+        }
+
+        function applyFilters() {
+            const text = document.getElementById('filterText').value.trim().toLowerCase();
+            const status = document.getElementById('filterStatus').value;
+            const level = document.getElementById('filterLevel').value;
+            const vendor = document.getElementById('filterVendor').value;
+
+            let visiblePorts = 0;
+            let totalPorts = 0;
+
+            document.querySelectorAll('.switch-card').forEach(card => {
+                const rows = card.querySelectorAll('.port-row');
+                let cardHasVisible = false;
+                const cardSearch = card.dataset.searchbase || '';
+
+                rows.forEach(row => {
+                    totalPorts++;
+                    let show = true;
+
+                    if (text) {
+                        const rowSearch = row.dataset.search || '';
+                        if (!rowSearch.includes(text) && !cardSearch.includes(text)) show = false;
+                    }
+
+                    if (status && show) {
+                        if (row.dataset.status !== status) show = false;
+                    }
+
+                    if (level && show) {
+                        if (row.dataset.level !== level) show = false;
+                    }
+
+                    if (vendor && show) {
+                        if (row.dataset.vendor !== vendor) show = false;
+                    }
+
+                    row.classList.toggle('port-row-hidden', !show);
+                    if (show) {
+                        visiblePorts++;
+                        cardHasVisible = true;
+                    }
+                });
+
+                card.classList.toggle('switch-card-hidden', !cardHasVisible);
+            });
+
+            const countEl = document.getElementById('filterCount');
+            const hasFilter = text || status || level || vendor;
+            countEl.textContent = hasFilter ? `${visiblePorts} / ${totalPorts} Ports` : '';
+        }
+
+        function renderPowerCell(power, limits, key) {
+            if (!power || power.value === undefined || power.value === null) {
+                return '<span style="color:var(--text-muted)">-</span>';
+            }
+
+            const val = parseFloat(power.value);
+            const unit = power.unit || 'dBm';
+            const level = getPowerLevel(val, limits, key);
+            const levelClass = level === 'ok' ? 'level-ok' : level === 'warn' ? 'level-warn' : 'level-alarm';
+            const barClass = level === 'ok' ? 'bar-ok' : level === 'warn' ? 'bar-warn' : 'bar-alarm';
+
+            const minDb = -40, maxDb = 10;
+            const pct = Math.max(0, Math.min(100, ((val - minDb) / (maxDb - minDb)) * 100));
+            const limitsText = getLimitsText(limits, key);
+
+            return `<div class="power-bar">
+                <span class="power-value ${levelClass}">${val.toFixed(2)} ${esc(unit)}</span>
+                <div class="power-bar-track" title="${escAttr(limitsText)}">
+                    <div class="power-bar-fill ${barClass}" style="width:${pct}%"></div>
+                </div>
+            </div>`;
+        }
+
+        function getPowerLevel(val, limits, key) {
+            if (!limits) return 'ok';
+            try {
+                const alarmHigh = limits.alarm?.high?.[key]?.value;
+                const alarmLow = limits.alarm?.low?.[key]?.value;
+                const warnHigh = limits.warning?.high?.[key]?.value;
+                const warnLow = limits.warning?.low?.[key]?.value;
+
+                if (alarmHigh !== undefined && val > parseFloat(alarmHigh)) return 'alarm';
+                if (alarmLow !== undefined && val < parseFloat(alarmLow)) return 'alarm';
+                if (warnHigh !== undefined && val > parseFloat(warnHigh)) return 'warn';
+                if (warnLow !== undefined && val < parseFloat(warnLow)) return 'warn';
+            } catch (e) { /* ignore */ }
+            return 'ok';
+        }
+
+        function getLimitsText(limits, key) {
+            if (!limits) return '';
+            try {
+                const ah = limits.alarm?.high?.[key]?.value;
+                const al = limits.alarm?.low?.[key]?.value;
+                const wh = limits.warning?.high?.[key]?.value;
+                const wl = limits.warning?.low?.[key]?.value;
+                const parts = [];
+                if (al !== undefined) parts.push('Alarm Low: ' + al);
+                if (wl !== undefined) parts.push('Warn Low: ' + wl);
+                if (wh !== undefined) parts.push('Warn High: ' + wh);
+                if (ah !== undefined) parts.push('Alarm High: ' + ah);
+                return parts.join(' | ');
+            } catch (e) { return ''; }
+        }
+
+        function esc(str) {
+            if (str === null || str === undefined) return '';
+            const div = document.createElement('div');
+            div.textContent = String(str);
+            return div.innerHTML;
+        }
+
+        function escAttr(str) {
+            if (str === null || str === undefined) return '';
+            return String(str).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        }
+
+        // Auto-load saved hosts on page load
+        (function init() {
+            const data = localStorage.getItem(STORAGE_KEY);
+            if (data) {
+                try {
+                    const arr = JSON.parse(data);
+                    hosts = arr.map(h => ({
+                        id: ++hostIdCounter,
+                        host: h.host || '',
+                        token: h.token || '',
+                        vdom: h.vdom || 'root'
+                    }));
+                } catch (e) { /* ignore */ }
+            }
+            if (hosts.length === 0) {
+                addHostRow();
+            } else {
+                renderHostTable();
+            }
+        })();
+    </script>
+</body>
+</html>
