@@ -62,17 +62,31 @@ def diagnose_single_host(host, token, vdom):
         params["vdom"] = vdom
 
     try:
-        # Step 1+2: Fetch status and transceivers in parallel
-        with ThreadPoolExecutor(max_workers=2) as executor:
+        # Step 1+2+3: Fetch status, transceivers and health-status in parallel
+        with ThreadPoolExecutor(max_workers=3) as executor:
             f_status = executor.submit(
                 fgt_get, session, "/monitor/switch-controller/managed-switch/status", params
             )
             f_transceivers = executor.submit(
                 fgt_get, session, "/monitor/switch-controller/managed-switch/transceivers", params
             )
+            f_health = executor.submit(
+                fgt_get, session, "/monitor/switch-controller/managed-switch/health-status", params
+            )
 
         switches = f_status.result().get("results", [])
         transceivers = f_transceivers.result().get("results", [])
+
+        # Build health lookup: switch_serial -> health data
+        health_map = {}
+        try:
+            health_results = f_health.result().get("results", [])
+            for h in health_results:
+                serial = h.get("serial", "")
+                if serial:
+                    health_map[serial] = h
+        except Exception:
+            pass  # health-status may not be available
 
         # Build lookup: (switch_serial, port) -> transceiver info
         transceiver_map = {}
@@ -114,12 +128,19 @@ def diagnose_single_host(host, token, vdom):
             # Sort ports by name for consistent ordering
             port_diagnostics.sort(key=lambda p: p.get("port", ""))
 
+            # Get health data for this switch
+            health = health_map.get(switch_serial, {})
+            summary = health.get("summary", {})
+            temp_data = summary.get("temperature", {})
+
             results.append({
                 "switch_id": switch_id,
                 "serial": switch_serial,
                 "name": switch_name,
                 "status": switch_status,
                 "os_version": os_version,
+                "temperature": temp_data.get("value"),
+                "temperature_rating": temp_data.get("rating", ""),
                 "ports": port_diagnostics,
             })
 

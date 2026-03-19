@@ -263,6 +263,19 @@
             color: var(--text-muted);
         }
 
+        .temp-badge {
+            background: var(--surface2);
+            border-radius: 12px;
+            padding: 0.25rem 0.75rem;
+            font-size: 0.75rem;
+            font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+            white-space: nowrap;
+        }
+
+        .temp-good { color: var(--green); }
+        .temp-marginal { color: var(--yellow); }
+        .temp-poor { color: var(--red); }
+
         .fgt-label {
             background: var(--accent);
             border-radius: 4px;
@@ -512,6 +525,53 @@
 
         .export-btns { margin-left: 0; }
 
+        /* --- Dashboard --- */
+        .dashboard {
+            display: none;
+            gap: 0.75rem;
+            margin-top: 1rem;
+        }
+
+        .dashboard.visible {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+        }
+
+        .dash-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 0.75rem 1rem;
+            text-align: center;
+        }
+
+        .dash-card-value {
+            font-size: 1.75rem;
+            font-weight: 700;
+            font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+            line-height: 1.2;
+        }
+
+        .dash-card-label {
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            margin-top: 0.25rem;
+        }
+
+        .dash-total .dash-card-value { color: var(--text); }
+        .dash-ok .dash-card-value { color: var(--green); }
+        .dash-ok { border-color: rgba(34, 197, 94, 0.3); }
+        .dash-warn .dash-card-value { color: var(--yellow); }
+        .dash-warn { border-color: rgba(234, 179, 8, 0.3); }
+        .dash-alarm .dash-card-value { color: var(--red); }
+        .dash-alarm { border-color: rgba(239, 68, 68, 0.3); }
+        .dash-down .dash-card-value { color: var(--text-muted); }
+        .dash-down { border-color: rgba(148, 163, 184, 0.3); }
+        .dash-switches .dash-card-value { color: var(--accent); }
+
         @media (max-width: 900px) {
             .host-panel-header { flex-direction: column; align-items: flex-start; }
             .port-table { font-size: 0.75rem; }
@@ -563,6 +623,33 @@
         </div>
 
         <div class="status-bar" id="statusBar"></div>
+
+        <div class="dashboard" id="dashboard">
+            <div class="dash-card dash-switches">
+                <div class="dash-card-value" id="dashSwitches">0</div>
+                <div class="dash-card-label">Switches</div>
+            </div>
+            <div class="dash-card dash-total">
+                <div class="dash-card-value" id="dashTotal">0</div>
+                <div class="dash-card-label">Fiber-Ports</div>
+            </div>
+            <div class="dash-card dash-ok">
+                <div class="dash-card-value" id="dashOk">0</div>
+                <div class="dash-card-label">OK</div>
+            </div>
+            <div class="dash-card dash-warn">
+                <div class="dash-card-value" id="dashWarn">0</div>
+                <div class="dash-card-label">Warning</div>
+            </div>
+            <div class="dash-card dash-alarm">
+                <div class="dash-card-value" id="dashAlarm">0</div>
+                <div class="dash-card-label">Alarm</div>
+            </div>
+            <div class="dash-card dash-down">
+                <div class="dash-card-value" id="dashDown">0</div>
+                <div class="dash-card-label">Down</div>
+            </div>
+        </div>
 
         <div class="filter-bar" id="filterBar">
             <input type="text" id="filterText" placeholder="Suche (Switch, Port, Vendor, S/N...)" oninput="applyFilters()" />
@@ -810,6 +897,7 @@
             resultsDiv.innerHTML = '';
             allResultData = [];
             document.getElementById('filterBar').classList.remove('visible');
+            document.getElementById('dashboard').classList.remove('visible');
             document.getElementById('filterText').value = '';
             document.getElementById('filterStatus').value = '';
             document.getElementById('filterLevel').value = '';
@@ -919,6 +1007,7 @@
                             ${sw.status ? ' &middot; ' + esc(sw.status) : ''}
                         </div>
                     </div>
+                    ${sw.temperature !== null && sw.temperature !== undefined ? `<span class="temp-badge temp-${sw.temperature_rating || 'good'}">${parseFloat(sw.temperature).toFixed(1)} °C</span>` : ''}
                     <span class="port-count">${sw.ports.length} Fiber-Port(s)</span>
                 `;
 
@@ -938,6 +1027,7 @@
             });
 
             updateVendorFilter();
+            updateDashboard();
             document.getElementById('filterBar').classList.add('visible');
         }
 
@@ -1076,6 +1166,47 @@
         }
 
         // --- Filters ---
+
+        function updateDashboard() {
+            let switches = 0, total = 0, ok = 0, warn = 0, alarm = 0, down = 0;
+
+            for (const { fgtHost, switches: swList } of allResultData) {
+                switches += swList.length;
+                for (const sw of swList) {
+                    for (const p of sw.ports) {
+                        if (p.error) { down++; total++; continue; }
+
+                        total++;
+                        const rawStatus = (p.link_status || '').toLowerCase();
+                        const normalized = normalizeStatus(rawStatus);
+                        if (normalized === 'down') { down++; continue; }
+
+                        const txRx = p.tx_rx || {};
+                        const limits = txRx.limits || {};
+                        const statusArr = txRx.status || [];
+                        const firstStatus = statusArr[0] || {};
+                        const txPower = firstStatus['tx-power'] || {};
+                        const rxPower = firstStatus['rx-power'] || {};
+                        const txVal = txPower.value !== undefined ? parseFloat(txPower.value) : null;
+                        const rxVal = rxPower.value !== undefined ? parseFloat(rxPower.value) : null;
+                        const txLevel = txVal !== null ? getPowerLevel(txVal, limits, 'tx-power') : 'ok';
+                        const rxLevel = rxVal !== null ? getPowerLevel(rxVal, limits, 'rx-power') : 'ok';
+
+                        if (txLevel === 'alarm' || rxLevel === 'alarm') alarm++;
+                        else if (txLevel === 'warn' || rxLevel === 'warn') warn++;
+                        else ok++;
+                    }
+                }
+            }
+
+            document.getElementById('dashSwitches').textContent = switches;
+            document.getElementById('dashTotal').textContent = total;
+            document.getElementById('dashOk').textContent = ok;
+            document.getElementById('dashWarn').textContent = warn;
+            document.getElementById('dashAlarm').textContent = alarm;
+            document.getElementById('dashDown').textContent = down;
+            document.getElementById('dashboard').classList.add('visible');
+        }
 
         function updateVendorFilter() {
             const vendors = new Set();
@@ -1273,7 +1404,8 @@
             }
 
             const sep = ';';
-            const headers = ['FortiGate', 'Switch', 'Serial', 'OS Version', 'Port', 'Status', 'Typ', 'Vendor',
+            const headers = ['FortiGate', 'Switch', 'Serial', 'OS Version', 'Temp (°C)', 'Temp Rating',
+                'Port', 'Status', 'Typ', 'Vendor',
                 'Part Number', 'Serial Number', 'Tx Power (dBm)', 'Rx Power (dBm)', 'Level',
                 'Tx Alarm High', 'Tx Warning High', 'Tx Warning Low', 'Tx Alarm Low',
                 'Rx Alarm High', 'Rx Warning High', 'Rx Warning Low', 'Rx Alarm Low'];
@@ -1305,6 +1437,8 @@
 
                         const row = [
                             fgtHost, sw.name || sw.switch_id, sw.serial, sw.os_version || '',
+                            sw.temperature !== null && sw.temperature !== undefined ? parseFloat(sw.temperature).toFixed(1) : '',
+                            sw.temperature_rating || '',
                             p.port, p.link_status || '', p.type || '', (p.vendor || '').trim(),
                             p.part_number || '', p.serial_number || '', txVal, rxVal, worstLevel,
                             lv(limits.alarm?.high?.['tx-power']), lv(limits.warning?.high?.['tx-power']),
@@ -1368,7 +1502,8 @@
                     doc.setFont(undefined, 'normal');
                     doc.setFontSize(8);
                     doc.setTextColor(100);
-                    doc.text(`FortiGate: ${fgtHost}  |  S/N: ${sw.serial}  |  FW: ${sw.os_version || '-'}  |  ${sw.status || ''}`, 14, yPos + 5);
+                    const tempStr = sw.temperature !== null && sw.temperature !== undefined ? `  |  Temp: ${parseFloat(sw.temperature).toFixed(1)} °C (${sw.temperature_rating || '-'})` : '';
+                    doc.text(`FortiGate: ${fgtHost}  |  S/N: ${sw.serial}  |  FW: ${sw.os_version || '-'}  |  ${sw.status || ''}${tempStr}`, 14, yPos + 5);
                     doc.setTextColor(0);
                     yPos += 10;
 
