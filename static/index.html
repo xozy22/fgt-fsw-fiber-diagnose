@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FortiSwitch Fiber Diagnose</title>
+    <script src="/static/lib/jspdf.umd.min.js"></script>
+    <script src="/static/lib/jspdf.plugin.autotable.min.js"></script>
     <style>
         :root {
             --bg: #0f172a;
@@ -299,8 +301,73 @@
             vertical-align: middle;
         }
 
-        .port-table tbody tr:hover { background: rgba(59, 130, 246, 0.05); }
+        .port-table tbody tr.port-row { cursor: pointer; }
+        .port-table tbody tr.port-row:hover { background: rgba(59, 130, 246, 0.05); }
+        .port-table tbody tr.port-detail:hover { background: transparent; }
         .port-table tbody tr:last-child td { border-bottom: none; }
+
+        .port-detail { display: none; }
+        .port-detail.open { display: table-row; }
+
+        .port-detail td {
+            padding: 0 1rem 0.75rem 1rem;
+            border-bottom: 1px solid rgba(71, 85, 105, 0.4);
+        }
+
+        .detail-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 0.75rem;
+            padding: 0.5rem 0;
+        }
+
+        .detail-card {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 0.625rem 0.75rem;
+        }
+
+        .detail-card-title {
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            margin-bottom: 0.375rem;
+        }
+
+        .detail-limits {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.25rem 1rem;
+            font-size: 0.75rem;
+        }
+
+        .detail-limit-label {
+            color: var(--text-muted);
+        }
+
+        .detail-limit-value {
+            font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+            text-align: right;
+        }
+
+        .detail-limit-value.alarm { color: var(--red); }
+        .detail-limit-value.warn { color: var(--yellow); }
+        .detail-limit-value.ok { color: var(--green); }
+
+        .detail-current {
+            margin-top: 0.375rem;
+            padding-top: 0.375rem;
+            border-top: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.75rem;
+        }
+
+        .detail-current-label { color: var(--text-muted); }
+        .detail-current-value { font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace; font-weight: 600; }
 
         .status-dot {
             display: inline-block;
@@ -421,7 +488,29 @@
         .port-row-hidden { display: none !important; }
         .switch-card-hidden { display: none !important; }
 
+        .port-table th.sortable {
+            cursor: pointer;
+            user-select: none;
+            position: relative;
+            padding-right: 1.25rem;
+        }
+
+        .port-table th.sortable:hover { color: var(--text); }
+
+        .port-table th.sortable::after {
+            content: '\2195';
+            position: absolute;
+            right: 0.25rem;
+            opacity: 0.3;
+            font-size: 0.65rem;
+        }
+
+        .port-table th.sort-asc::after { content: '\2191'; opacity: 0.8; }
+        .port-table th.sort-desc::after { content: '\2193'; opacity: 0.8; }
+
         input[type="file"] { display: none; }
+
+        .export-btns { margin-left: 0; }
 
         @media (max-width: 900px) {
             .host-panel-header { flex-direction: column; align-items: flex-start; }
@@ -501,6 +590,10 @@
                 </select>
             </div>
             <span class="filter-count" id="filterCount"></span>
+            <div class="filter-group export-btns">
+                <button class="btn btn-sm btn-secondary" onclick="exportResultsCsv()">CSV Export</button>
+                <button class="btn btn-sm btn-secondary" onclick="exportResultsPdf()">PDF Export</button>
+            </div>
         </div>
 
         <div class="results" id="results"></div>
@@ -722,41 +815,46 @@
             document.getElementById('filterLevel').value = '';
             document.getElementById('filterVendor').value = '';
 
-            // Disable all buttons during query
             document.querySelectorAll('.btn').forEach(b => b.disabled = true);
-            showStatus(`Abfrage von ${hostList.length} Host(s) läuft...`, 'loading');
+            showStatus(`Abfrage von ${hostList.length} Host(s) parallel...`, 'loading');
 
             let totalSwitches = 0;
             let totalPorts = 0;
             let errors = 0;
 
-            for (const h of hostList) {
-                try {
-                    const resp = await fetch('/api/diagnose', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ host: h.host, token: h.token, vdom: h.vdom })
-                    });
+            try {
+                const resp = await fetch('/api/diagnose-multi', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        hosts: hostList.map(h => ({ host: h.host, token: h.token, vdom: h.vdom }))
+                    })
+                });
 
-                    const data = await resp.json();
+                const data = await resp.json();
 
-                    if (!resp.ok) {
-                        appendError(resultsDiv, h.host, data.error || 'Unbekannter Fehler');
-                        errors++;
-                        continue;
-                    }
-
-                    if (data.switches && data.switches.length > 0) {
-                        totalSwitches += data.switches.length;
-                        totalPorts += data.switches.reduce((s, sw) => s + sw.ports.length, 0);
-                        renderResults(data.switches, h.host, resultsDiv);
-                    } else {
-                        appendError(resultsDiv, h.host, 'Keine managed Switches mit Fiber-Ports gefunden.');
-                    }
-                } catch (e) {
-                    appendError(resultsDiv, h.host, 'Netzwerkfehler: ' + e.message);
-                    errors++;
+                if (!resp.ok) {
+                    showStatus(data.error || 'Unbekannter Fehler', 'error');
+                    document.querySelectorAll('.btn').forEach(b => b.disabled = false);
+                    return;
                 }
+
+                for (const result of (data.results || [])) {
+                    if (result.error) {
+                        appendError(resultsDiv, result.host, result.error);
+                        errors++;
+                    } else if (result.switches && result.switches.length > 0) {
+                        totalSwitches += result.switches.length;
+                        totalPorts += result.switches.reduce((s, sw) => s + sw.ports.length, 0);
+                        renderResults(result.switches, result.host, resultsDiv);
+                    } else {
+                        appendError(resultsDiv, result.host, 'Keine managed Switches mit Fiber-Ports gefunden.');
+                    }
+                }
+            } catch (e) {
+                showStatus('Netzwerkfehler: ' + e.message, 'error');
+                document.querySelectorAll('.btn').forEach(b => b.disabled = false);
+                return;
             }
 
             document.querySelectorAll('.btn').forEach(b => b.disabled = false);
@@ -847,14 +945,14 @@
             let html = `<table class="port-table">
                 <thead>
                     <tr>
-                        <th>Port</th>
-                        <th>Status</th>
-                        <th>Typ</th>
-                        <th>Vendor</th>
-                        <th>Part Number</th>
+                        <th class="sortable" data-sort="port" onclick="sortTable(this)">Port</th>
+                        <th class="sortable" data-sort="status" onclick="sortTable(this)">Status</th>
+                        <th class="sortable" data-sort="type" onclick="sortTable(this)">Typ</th>
+                        <th class="sortable" data-sort="vendor" onclick="sortTable(this)">Vendor</th>
+                        <th class="sortable" data-sort="part" onclick="sortTable(this)">Part Number</th>
                         <th>S/N</th>
-                        <th>Tx Power</th>
-                        <th>Rx Power</th>
+                        <th class="sortable" data-sort="tx" onclick="sortTable(this)">Tx Power</th>
+                        <th class="sortable" data-sort="rx" onclick="sortTable(this)">Rx Power</th>
                     </tr>
                 </thead>
                 <tbody>`;
@@ -891,9 +989,17 @@
                 const vendor = (p.vendor || '').trim();
                 const searchStr = [p.port, p.link_status, p.type, vendor, p.part_number, p.serial_number].join(' ').toLowerCase();
 
+                const rowId = 'port-' + Math.random().toString(36).substr(2, 9);
+
                 html += `<tr class="port-row" data-status="${escAttr(normalizedStatus)}"
                              data-level="${escAttr(worstLevel)}" data-vendor="${escAttr(vendor)}"
-                             data-search="${escAttr(searchStr)}">
+                             data-search="${escAttr(searchStr)}"
+                             data-port="${escAttr(p.port || '')}"
+                             data-type="${escAttr(p.type || '')}"
+                             data-part="${escAttr(p.part_number || '')}"
+                             data-tx="${txVal !== null ? txVal : ''}"
+                             data-rx="${rxVal !== null ? rxVal : ''}"
+                             onclick="togglePortDetail('${rowId}')">
                     <td><strong>${esc(p.port)}</strong></td>
                     <td><span class="status-dot ${normalizedStatus}"></span>${esc(p.link_status || '-')}</td>
                     <td>${esc(p.type || '-')}</td>
@@ -903,10 +1009,62 @@
                     <td>${renderPowerCell(txPower, limits, 'tx-power')}</td>
                     <td>${renderPowerCell(rxPower, limits, 'rx-power')}</td>
                 </tr>`;
+                html += buildPortDetailRow(rowId, txPower, rxPower, limits, txLevel, rxLevel);
             });
 
             html += '</tbody></table>';
             return html;
+        }
+
+        // --- Sorting ---
+
+        function sortTable(th) {
+            const table = th.closest('table');
+            const tbody = table.querySelector('tbody');
+            const sortKey = th.dataset.sort;
+            const allThs = table.querySelectorAll('th.sortable');
+
+            // Determine direction
+            let dir = 'asc';
+            if (th.classList.contains('sort-asc')) dir = 'desc';
+            else if (th.classList.contains('sort-desc')) dir = '';
+
+            // Clear all sort classes
+            allThs.forEach(t => t.classList.remove('sort-asc', 'sort-desc'));
+
+            if (!dir) return; // Reset to original order — just remove classes
+
+            th.classList.add(dir === 'asc' ? 'sort-asc' : 'sort-desc');
+
+            const rows = [...tbody.querySelectorAll('tr.port-row')];
+            const isNumeric = (sortKey === 'tx' || sortKey === 'rx');
+
+            rows.sort((a, b) => {
+                let va = a.dataset[sortKey] || '';
+                let vb = b.dataset[sortKey] || '';
+
+                if (isNumeric) {
+                    const na = va !== '' ? parseFloat(va) : -Infinity;
+                    const nb = vb !== '' ? parseFloat(vb) : -Infinity;
+                    return dir === 'asc' ? na - nb : nb - na;
+                }
+
+                va = va.toLowerCase();
+                vb = vb.toLowerCase();
+                if (va < vb) return dir === 'asc' ? -1 : 1;
+                if (va > vb) return dir === 'asc' ? 1 : -1;
+                return 0;
+            });
+
+            rows.forEach(r => {
+                tbody.appendChild(r);
+                // Move the detail row right after its port row
+                const detailId = r.getAttribute('onclick')?.match(/'([^']+)'/)?.[1];
+                if (detailId) {
+                    const detail = document.getElementById(detailId);
+                    if (detail) tbody.appendChild(detail);
+                }
+            });
         }
 
         function normalizeStatus(raw) {
@@ -974,6 +1132,15 @@
                     }
 
                     row.classList.toggle('port-row-hidden', !show);
+                    // Also hide/show the associated detail row
+                    const detailId = row.getAttribute('onclick')?.match(/'([^']+)'/)?.[1];
+                    if (detailId) {
+                        const detail = document.getElementById(detailId);
+                        if (detail) {
+                            detail.classList.toggle('port-row-hidden', !show);
+                            if (!show) detail.classList.remove('open');
+                        }
+                    }
                     if (show) {
                         visiblePorts++;
                         cardHasVisible = true;
@@ -1027,6 +1194,60 @@
             return 'ok';
         }
 
+        function togglePortDetail(rowId) {
+            const detail = document.getElementById(rowId);
+            if (detail) detail.classList.toggle('open');
+        }
+
+        function buildPortDetailRow(rowId, txPower, rxPower, limits, txLevel, rxLevel) {
+            const txVal = txPower?.value !== undefined ? parseFloat(txPower.value) : null;
+            const rxVal = rxPower?.value !== undefined ? parseFloat(rxPower.value) : null;
+            const txUnit = txPower?.unit || 'dBm';
+            const rxUnit = rxPower?.unit || 'dBm';
+
+            function limitsCard(title, key, currentVal, unit, level) {
+                const ah = limits?.alarm?.high?.[key]?.value;
+                const al = limits?.alarm?.low?.[key]?.value;
+                const wh = limits?.warning?.high?.[key]?.value;
+                const wl = limits?.warning?.low?.[key]?.value;
+
+                const hasLimits = ah !== undefined || al !== undefined || wh !== undefined || wl !== undefined;
+                if (!hasLimits && currentVal === null) return '';
+
+                let h = `<div class="detail-card"><div class="detail-card-title">${esc(title)}</div>`;
+                if (hasLimits) {
+                    h += '<div class="detail-limits">';
+                    if (ah !== undefined) h += `<span class="detail-limit-label">Alarm High</span><span class="detail-limit-value alarm">${parseFloat(ah).toFixed(2)} ${esc(unit)}</span>`;
+                    if (wh !== undefined) h += `<span class="detail-limit-label">Warning High</span><span class="detail-limit-value warn">${parseFloat(wh).toFixed(2)} ${esc(unit)}</span>`;
+                    if (wl !== undefined) h += `<span class="detail-limit-label">Warning Low</span><span class="detail-limit-value warn">${parseFloat(wl).toFixed(2)} ${esc(unit)}</span>`;
+                    if (al !== undefined) h += `<span class="detail-limit-label">Alarm Low</span><span class="detail-limit-value alarm">${parseFloat(al).toFixed(2)} ${esc(unit)}</span>`;
+                    h += '</div>';
+                }
+                if (currentVal !== null) {
+                    const cls = level === 'alarm' ? 'alarm' : level === 'warn' ? 'warn' : 'ok';
+                    h += `<div class="detail-current">
+                        <span class="detail-current-label">Aktuell</span>
+                        <span class="detail-current-value detail-limit-value ${cls}">${currentVal.toFixed(2)} ${esc(unit)}</span>
+                    </div>`;
+                }
+                h += '</div>';
+                return h;
+            }
+
+            const txCard = limitsCard('Tx Power', 'tx-power', txVal, txUnit, txLevel);
+            const rxCard = limitsCard('Rx Power', 'rx-power', rxVal, rxUnit, rxLevel);
+
+            if (!txCard && !rxCard) {
+                return `<tr class="port-detail" id="${rowId}"><td colspan="8" style="color:var(--text-muted);padding:0.5rem 1rem;font-size:0.75rem">Keine Schwellwert-Daten verfügbar.</td></tr>`;
+            }
+
+            return `<tr class="port-detail" id="${rowId}">
+                <td colspan="8">
+                    <div class="detail-grid">${txCard}${rxCard}</div>
+                </td>
+            </tr>`;
+        }
+
         function getLimitsText(limits, key) {
             if (!limits) return '';
             try {
@@ -1041,6 +1262,200 @@
                 if (ah !== undefined) parts.push('Alarm High: ' + ah);
                 return parts.join(' | ');
             } catch (e) { return ''; }
+        }
+
+        // --- Result Export ---
+
+        function exportResultsCsv() {
+            if (allResultData.length === 0) {
+                showStatus('Keine Ergebnisse zum Exportieren vorhanden.', 'error');
+                return;
+            }
+
+            const sep = ';';
+            const headers = ['FortiGate', 'Switch', 'Serial', 'OS Version', 'Port', 'Status', 'Typ', 'Vendor',
+                'Part Number', 'Serial Number', 'Tx Power (dBm)', 'Rx Power (dBm)', 'Level',
+                'Tx Alarm High', 'Tx Warning High', 'Tx Warning Low', 'Tx Alarm Low',
+                'Rx Alarm High', 'Rx Warning High', 'Rx Warning Low', 'Rx Alarm Low'];
+
+            let csv = headers.join(sep) + '\n';
+
+            for (const { fgtHost, switches } of allResultData) {
+                for (const sw of switches) {
+                    for (const p of sw.ports) {
+                        if (p.error) continue;
+
+                        const txRx = p.tx_rx || {};
+                        const limits = txRx.limits || {};
+                        const statusArr = txRx.status || [];
+                        const firstStatus = statusArr[0] || {};
+                        const txPower = firstStatus['tx-power'] || {};
+                        const rxPower = firstStatus['rx-power'] || {};
+
+                        const txVal = txPower.value !== undefined ? parseFloat(txPower.value).toFixed(2) : '';
+                        const rxVal = rxPower.value !== undefined ? parseFloat(rxPower.value).toFixed(2) : '';
+
+                        const txLevel = txVal !== '' ? getPowerLevel(parseFloat(txVal), limits, 'tx-power') : '';
+                        const rxLevel = rxVal !== '' ? getPowerLevel(parseFloat(rxVal), limits, 'rx-power') : '';
+                        const worstLevel = (txLevel === 'alarm' || rxLevel === 'alarm') ? 'alarm'
+                                         : (txLevel === 'warn' || rxLevel === 'warn') ? 'warn'
+                                         : (txLevel || rxLevel) ? 'ok' : '';
+
+                        const lv = (path) => { try { return path?.value ?? ''; } catch { return ''; } };
+
+                        const row = [
+                            fgtHost, sw.name || sw.switch_id, sw.serial, sw.os_version || '',
+                            p.port, p.link_status || '', p.type || '', (p.vendor || '').trim(),
+                            p.part_number || '', p.serial_number || '', txVal, rxVal, worstLevel,
+                            lv(limits.alarm?.high?.['tx-power']), lv(limits.warning?.high?.['tx-power']),
+                            lv(limits.warning?.low?.['tx-power']), lv(limits.alarm?.low?.['tx-power']),
+                            lv(limits.alarm?.high?.['rx-power']), lv(limits.warning?.high?.['rx-power']),
+                            lv(limits.warning?.low?.['rx-power']), lv(limits.alarm?.low?.['rx-power']),
+                        ];
+
+                        csv += row.map(v => {
+                            const s = String(v);
+                            return (s.includes(sep) || s.includes('"') || s.includes('\n'))
+                                ? '"' + s.replace(/"/g, '""') + '"' : s;
+                        }).join(sep) + '\n';
+                    }
+                }
+            }
+
+            const bom = '\uFEFF';
+            const blob = new Blob([bom + csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+            a.download = `fiber-diagnose_${ts}.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        function exportResultsPdf() {
+            if (allResultData.length === 0) {
+                showStatus('Keine Ergebnisse zum Exportieren vorhanden.', 'error');
+                return;
+            }
+
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+            const pageWidth = doc.internal.pageSize.getWidth();
+            let firstPage = true;
+
+            // Title
+            doc.setFontSize(16);
+            doc.text('FortiSwitch Fiber Diagnose', pageWidth / 2, 15, { align: 'center' });
+            doc.setFontSize(9);
+            doc.setTextColor(100);
+            doc.text('Erstellt am ' + new Date().toLocaleString('de-DE'), pageWidth / 2, 21, { align: 'center' });
+            doc.setTextColor(0);
+
+            let yPos = 28;
+
+            for (const { fgtHost, switches } of allResultData) {
+                for (const sw of switches) {
+                    if (!firstPage && yPos > doc.internal.pageSize.getHeight() - 30) {
+                        doc.addPage();
+                        yPos = 15;
+                    }
+
+                    // Switch header
+                    doc.setFontSize(11);
+                    doc.setFont(undefined, 'bold');
+                    doc.text(`${sw.name || sw.switch_id}`, 14, yPos);
+                    doc.setFont(undefined, 'normal');
+                    doc.setFontSize(8);
+                    doc.setTextColor(100);
+                    doc.text(`FortiGate: ${fgtHost}  |  S/N: ${sw.serial}  |  FW: ${sw.os_version || '-'}  |  ${sw.status || ''}`, 14, yPos + 5);
+                    doc.setTextColor(0);
+                    yPos += 10;
+
+                    // Port table
+                    const headers = ['Port', 'Status', 'Typ', 'Vendor', 'Part Number', 'S/N',
+                        'Tx (dBm)', 'Rx (dBm)', 'Level', 'Tx Warn L/H', 'Tx Alarm L/H', 'Rx Warn L/H', 'Rx Alarm L/H'];
+
+                    const rows = sw.ports.filter(p => !p.error).map(p => {
+                        const txRx = p.tx_rx || {};
+                        const limits = txRx.limits || {};
+                        const statusArr = txRx.status || [];
+                        const firstStatus = statusArr[0] || {};
+                        const txPower = firstStatus['tx-power'] || {};
+                        const rxPower = firstStatus['rx-power'] || {};
+                        const txVal = txPower.value !== undefined ? parseFloat(txPower.value).toFixed(2) : '-';
+                        const rxVal = rxPower.value !== undefined ? parseFloat(rxPower.value).toFixed(2) : '-';
+
+                        const txLvl = txVal !== '-' ? getPowerLevel(parseFloat(txVal), limits, 'tx-power') : '';
+                        const rxLvl = rxVal !== '-' ? getPowerLevel(parseFloat(rxVal), limits, 'rx-power') : '';
+                        const worst = (txLvl === 'alarm' || rxLvl === 'alarm') ? 'ALARM'
+                                    : (txLvl === 'warn' || rxLvl === 'warn') ? 'WARN' : 'OK';
+
+                        const lv = (path) => { try { return path?.value !== undefined ? parseFloat(path.value).toFixed(1) : '-'; } catch { return '-'; } };
+
+                        const txWarnL = lv(limits.warning?.low?.['tx-power']);
+                        const txWarnH = lv(limits.warning?.high?.['tx-power']);
+                        const txAlarmL = lv(limits.alarm?.low?.['tx-power']);
+                        const txAlarmH = lv(limits.alarm?.high?.['tx-power']);
+                        const rxWarnL = lv(limits.warning?.low?.['rx-power']);
+                        const rxWarnH = lv(limits.warning?.high?.['rx-power']);
+                        const rxAlarmL = lv(limits.alarm?.low?.['rx-power']);
+                        const rxAlarmH = lv(limits.alarm?.high?.['rx-power']);
+
+                        return [
+                            p.port, p.link_status || '-', p.type || '-', (p.vendor || '').trim() || '-',
+                            p.part_number || '-', p.serial_number || '-',
+                            txVal, rxVal, worst,
+                            `${txWarnL} / ${txWarnH}`, `${txAlarmL} / ${txAlarmH}`,
+                            `${rxWarnL} / ${rxWarnH}`, `${rxAlarmL} / ${rxAlarmH}`,
+                        ];
+                    });
+
+                    doc.autoTable({
+                        startY: yPos,
+                        head: [headers],
+                        body: rows,
+                        theme: 'grid',
+                        styles: { fontSize: 7, cellPadding: 1.5 },
+                        headStyles: { fillColor: [30, 41, 59], textColor: [226, 232, 240], fontSize: 6.5, fontStyle: 'bold' },
+                        columnStyles: {
+                            0: { fontStyle: 'bold' },
+                            6: { halign: 'right' },
+                            7: { halign: 'right' },
+                            8: { halign: 'center' },
+                            9: { halign: 'center', fontSize: 6 },
+                            10: { halign: 'center', fontSize: 6 },
+                            11: { halign: 'center', fontSize: 6 },
+                            12: { halign: 'center', fontSize: 6 },
+                        },
+                        didParseCell: function(data) {
+                            if (data.section === 'body' && data.column.index === 8) {
+                                const val = data.cell.raw;
+                                if (val === 'ALARM') { data.cell.styles.textColor = [220, 38, 38]; data.cell.styles.fontStyle = 'bold'; }
+                                else if (val === 'WARN') { data.cell.styles.textColor = [180, 83, 9]; data.cell.styles.fontStyle = 'bold'; }
+                                else if (val === 'OK') { data.cell.styles.textColor = [22, 163, 74]; }
+                            }
+                        },
+                        margin: { left: 14, right: 14 },
+                    });
+
+                    yPos = doc.lastAutoTable.finalY + 8;
+                    firstPage = false;
+                }
+            }
+
+            // Footer on each page
+            const totalPages = doc.internal.getNumberOfPages();
+            for (let i = 1; i <= totalPages; i++) {
+                doc.setPage(i);
+                doc.setFontSize(7);
+                doc.setTextColor(150);
+                doc.text(`Seite ${i} / ${totalPages}`, pageWidth - 14, doc.internal.pageSize.getHeight() - 7, { align: 'right' });
+                doc.text('FortiSwitch Fiber Diagnose', 14, doc.internal.pageSize.getHeight() - 7);
+            }
+
+            const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+            doc.save(`fiber-diagnose_${ts}.pdf`);
         }
 
         function esc(str) {

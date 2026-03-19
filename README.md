@@ -6,12 +6,16 @@ Web-Tool zur Diagnose von Fiber-Transceiver-Ports auf FortiSwitch-Geräten, die 
 
 ## Features
 
-- **Multi-Host-Unterstützung** — Mehrere FortiGates gleichzeitig abfragen
+- **Multi-Host-Unterstützung** — Mehrere FortiGates gleichzeitig abfragen (parallel im Backend)
 - **CSV Import/Export** — Host-Listen als CSV importieren und exportieren
 - **Speichern/Laden** — Host-Konfiguration im Browser persistieren (localStorage)
 - **Transceiver-Diagnose** — Tx/Rx Power mit farbcodierter Bewertung (OK/Warning/Alarm)
+- **Port-Details** — Klick auf einen Port zeigt alle Schwellwerte (Alarm/Warning High/Low)
+- **Sortierbare Tabellen** — Klick auf Spaltenheader sortiert nach Port, Status, Tx/Rx Power etc.
 - **Filter** — Ergebnisse nach Freitext, Link-Status, Power-Level und Vendor filtern
+- **Ergebnis-Export** — Diagnosedaten als CSV oder PDF exportieren
 - **Übersichtliche Darstellung** — Switches als aufklappbare Karten mit Zuordnung zur FortiGate
+- **Parallele Abfragen** — Hosts, Switches und Ports werden parallel abgefragt für maximale Geschwindigkeit
 
 ## Voraussetzungen
 
