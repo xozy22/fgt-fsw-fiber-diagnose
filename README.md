@@ -2,6 +2,8 @@
 
 Web-Tool zur Diagnose von Fiber-Transceiver-Ports auf FortiSwitch-Geräten, die über FortiLink von einer FortiGate verwaltet werden. Liest Tx/Rx Power-Werte, Schwellwerte (Warning/Alarm) und Transceiver-Informationen über die FortiGate REST API aus.
 
+![Screenshot](docs/screenshot.png)
+
 ## Features
 
 - **Multi-Host-Unterstützung** — Mehrere FortiGates gleichzeitig abfragen
