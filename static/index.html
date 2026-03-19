@@ -958,6 +958,7 @@
             document.getElementById('filterVendor').value = '';
 
             document.querySelectorAll('.btn').forEach(b => b.disabled = true);
+            const queryStartTime = Date.now();
             showStatus(`Abfrage von ${hostList.length} Host(s) parallel...`, 'loading');
 
             let totalSwitches = 0;
@@ -1023,11 +1024,12 @@
 
             document.querySelectorAll('.btn').forEach(b => b.disabled = false);
 
+            const duration = ((Date.now() - queryStartTime) / 1000).toFixed(1);
             if (errors > 0 && totalSwitches === 0) {
-                showStatus(`Abfrage abgeschlossen mit ${errors} Fehler(n).`, 'error');
+                showStatus(`Abfrage abgeschlossen mit ${errors} Fehler(n). (${duration}s)`, 'error');
             } else {
                 showStatus(
-                    `${totalSwitches} Switch(es) mit ${totalPorts} Fiber-Port(s) gefunden.` +
+                    `${totalSwitches} Switch(es) mit ${totalPorts} Fiber-Port(s) gefunden. (${duration}s)` +
                     (errors > 0 ? ` ${errors} Host(s) mit Fehlern.` : ''),
                     totalSwitches > 0 ? 'success' : 'error'
                 );
