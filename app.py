@@ -1,7 +1,8 @@
+import json
 import requests
 import urllib3
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, Response
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -57,14 +58,20 @@ def fetch_tx_rx(session, params, switch_serial, port, transceiver_info):
         }
 
 
-def diagnose_single_host(host, token, vdom):
+def diagnose_single_host(host, token, vdom, progress_cb=None):
     """Diagnose a single FortiGate. Returns dict with switches or error."""
     session = get_fortigate_session(host, token)
     params = {}
     if vdom:
         params["vdom"] = vdom
 
+    def emit(step, detail=""):
+        if progress_cb:
+            progress_cb(host, step, detail)
+
     try:
+        emit("connect", "Verbinde und lade Switch-Daten...")
+
         # Step 1+2+3: Fetch status, transceivers and health-status in parallel
         with ThreadPoolExecutor(max_workers=3) as executor:
             f_status = executor.submit(
@@ -79,6 +86,8 @@ def diagnose_single_host(host, token, vdom):
 
         switches = f_status.result().get("results", [])
         transceivers = f_transceivers.result().get("results", [])
+
+        emit("switches", f"{len(switches)} Switch(es), {len(transceivers)} Transceiver gefunden")
 
         # Build health lookup: switch_serial -> health data
         health_map = {}
@@ -117,8 +126,12 @@ def diagnose_single_host(host, token, vdom):
             for port in fiber_ports:
                 all_fetch_jobs.append((switch_serial, port, transceiver_map.get((switch_serial, port), {})))
 
+        total_ports = len(all_fetch_jobs)
+        emit("tx-rx", f"Lese Tx/Rx Power für {total_ports} Port(s)...")
+
         # Fetch ALL tx-rx data across all switches in one parallel batch
         port_results = {}  # switch_serial -> [port_diagnostics]
+        completed_ports = 0
         if all_fetch_jobs:
             with ThreadPoolExecutor(max_workers=min(16, len(all_fetch_jobs))) as executor:
                 futures = {
@@ -130,6 +143,9 @@ def diagnose_single_host(host, token, vdom):
                 for future in as_completed(futures):
                     serial = futures[future]
                     port_results.setdefault(serial, []).append(future.result())
+                    completed_ports += 1
+                    if completed_ports % 2 == 0 or completed_ports == total_ports:
+                        emit("tx-rx-progress", f"Tx/Rx: {completed_ports}/{total_ports} Ports")
 
         # Build results
         results = []
@@ -155,6 +171,7 @@ def diagnose_single_host(host, token, vdom):
                 "ports": port_diagnostics,
             })
 
+        emit("done", f"{len(results)} Switch(es) mit {total_ports} Fiber-Port(s)")
         return {"host": host, "switches": results}
 
     except requests.exceptions.ConnectionError:
@@ -196,7 +213,7 @@ def diagnose():
 
 @app.route("/api/diagnose-multi", methods=["POST"])
 def diagnose_multi():
-    """Diagnose multiple FortiGates in parallel."""
+    """Diagnose multiple FortiGates in parallel with SSE progress."""
     data = request.get_json()
     host_list = data.get("hosts", [])
 
@@ -220,6 +237,70 @@ def diagnose_multi():
             results.append(future.result())
 
     return jsonify({"results": results})
+
+
+@app.route("/api/diagnose-stream", methods=["POST"])
+def diagnose_stream():
+    """Diagnose multiple FortiGates with SSE progress streaming."""
+    data = request.get_json()
+    host_list = data.get("hosts", [])
+
+    if not host_list:
+        return jsonify({"error": "Keine Hosts angegeben."}), 400
+
+    valid_hosts = [
+        h for h in host_list
+        if h.get("host", "").strip() and h.get("token", "").strip()
+    ]
+
+    def generate():
+        import queue
+        import threading
+
+        progress_queue = queue.Queue()
+
+        def progress_cb(host, step, detail):
+            progress_queue.put({"type": "progress", "host": host, "step": step, "detail": detail})
+
+        def run_host(h):
+            result = diagnose_single_host(
+                h.get("host", "").strip(),
+                h.get("token", "").strip(),
+                h.get("vdom", "root").strip(),
+                progress_cb=progress_cb,
+            )
+            progress_queue.put({"type": "result", "data": result})
+
+        # Start all host diagnostics in parallel
+        threads = []
+        for h in valid_hosts:
+            t = threading.Thread(target=run_host, args=(h,))
+            t.start()
+            threads.append(t)
+
+        # Monitor progress and results
+        results_received = 0
+        total_hosts = len(valid_hosts)
+
+        while results_received < total_hosts:
+            try:
+                msg = progress_queue.get(timeout=0.1)
+                if msg["type"] == "progress":
+                    yield f"data: {json.dumps(msg)}\n\n"
+                elif msg["type"] == "result":
+                    yield f"data: {json.dumps(msg)}\n\n"
+                    results_received += 1
+            except queue.Empty:
+                continue
+
+        # Wait for all threads to finish
+        for t in threads:
+            t.join()
+
+        yield f"data: {json.dumps({'type': 'complete'})}\n\n"
+
+    return Response(generate(), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 if __name__ == "__main__":

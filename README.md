@@ -17,6 +17,7 @@ Web-Tool zur Diagnose von Fiber-Transceiver-Ports auf FortiSwitch-Geräten, die 
 - **Filter** — Ergebnisse nach Freitext, Link-Status, Power-Level und Vendor filtern
 - **Ergebnis-Export** — Diagnosedaten als CSV oder PDF exportieren (inkl. Temperatur)
 - **Übersichtliche Darstellung** — Switches als aufklappbare Karten mit Zuordnung zur FortiGate
+- **Live-Fortschrittsanzeige** — Echtzeit-Status pro Host mit Spinner, Schritt-Details und Laufzeit-Timer (SSE)
 - **Parallele Abfragen** — Hosts, Switches und Ports werden parallel abgefragt für maximale Geschwindigkeit
 
 ## Voraussetzungen

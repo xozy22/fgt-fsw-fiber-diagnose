@@ -209,6 +209,60 @@
             background: rgba(59, 130, 246, 0.15);
             border: 1px solid var(--accent);
             color: var(--accent);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .status-bar.loading .progress-bar {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            height: 3px;
+            background: var(--accent);
+            animation: indeterminate 1.8s ease-in-out infinite;
+        }
+
+        @keyframes indeterminate {
+            0% { left: -30%; width: 30%; }
+            50% { left: 50%; width: 40%; }
+            100% { left: 100%; width: 30%; }
+        }
+
+        .status-bar .loading-content {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.75rem;
+        }
+
+        .spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(59, 130, 246, 0.3);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            flex-shrink: 0;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .elapsed-time {
+            font-variant-numeric: tabular-nums;
+            opacity: 0.8;
+        }
+
+        .status-text {
+            flex: 1;
+            text-align: left;
+            line-height: 1.5;
+        }
+
+        .progress-host {
+            color: var(--text);
+            font-weight: 500;
         }
 
         .status-bar.success {
@@ -911,7 +965,7 @@
             let errors = 0;
 
             try {
-                const resp = await fetch('/api/diagnose-multi', {
+                const resp = await fetch('/api/diagnose-stream', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -919,24 +973,46 @@
                     })
                 });
 
-                const data = await resp.json();
-
                 if (!resp.ok) {
+                    const data = await resp.json();
                     showStatus(data.error || 'Unbekannter Fehler', 'error');
                     document.querySelectorAll('.btn').forEach(b => b.disabled = false);
                     return;
                 }
 
-                for (const result of (data.results || [])) {
-                    if (result.error) {
-                        appendError(resultsDiv, result.host, result.error);
-                        errors++;
-                    } else if (result.switches && result.switches.length > 0) {
-                        totalSwitches += result.switches.length;
-                        totalPorts += result.switches.reduce((s, sw) => s + sw.ports.length, 0);
-                        renderResults(result.switches, result.host, resultsDiv);
-                    } else {
-                        appendError(resultsDiv, result.host, 'Keine managed Switches mit Fiber-Ports gefunden.');
+                const reader = resp.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop();
+
+                    for (const line of lines) {
+                        if (!line.startsWith('data: ')) continue;
+                        const msg = JSON.parse(line.slice(6));
+
+                        if (msg.type === 'progress') {
+                            updateProgress(msg.host, msg.step, msg.detail, hostList.length);
+                        } else if (msg.type === 'result') {
+                            const result = msg.data;
+                            if (result.error) {
+                                appendError(resultsDiv, result.host, result.error);
+                                errors++;
+                            } else if (result.switches && result.switches.length > 0) {
+                                totalSwitches += result.switches.length;
+                                totalPorts += result.switches.reduce((s, sw) => s + sw.ports.length, 0);
+                                renderResults(result.switches, result.host, resultsDiv);
+                            } else {
+                                appendError(resultsDiv, result.host, 'Keine managed Switches mit Fiber-Ports gefunden.');
+                            }
+                        } else if (msg.type === 'complete') {
+                            break;
+                        }
                     }
                 }
             } catch (e) {
@@ -958,6 +1034,15 @@
             }
         }
 
+        const hostProgress = {};
+        function updateProgress(host, step, detail, totalHosts) {
+            hostProgress[host] = { step, detail };
+            const steps = Object.entries(hostProgress);
+            const lines = steps.map(([h, s]) => `<span class="progress-host">${esc(h)}</span> ${esc(s.detail)}`);
+            const statusText = document.querySelector('.loading-content .status-text');
+            if (statusText) statusText.innerHTML = lines.join('<br>');
+        }
+
         function appendError(container, host, message) {
             const div = document.createElement('div');
             div.className = 'switch-card';
@@ -974,10 +1059,31 @@
 
         // --- UI Helpers ---
 
+        let elapsedTimer = null;
+
         function showStatus(msg, type) {
             const bar = document.getElementById('statusBar');
             bar.className = 'status-bar ' + type;
-            bar.textContent = msg;
+            clearInterval(elapsedTimer);
+            elapsedTimer = null;
+
+            if (type === 'loading') {
+                const startTime = Date.now();
+                for (const k in hostProgress) delete hostProgress[k];
+                bar.innerHTML = `
+                    <div class="loading-content">
+                        <div class="spinner"></div>
+                        <span class="status-text">${msg}</span>
+                        <span class="elapsed-time" id="elapsedTime">0.0s</span>
+                    </div>
+                    <div class="progress-bar"></div>`;
+                elapsedTimer = setInterval(() => {
+                    const el = document.getElementById('elapsedTime');
+                    if (el) el.textContent = ((Date.now() - startTime) / 1000).toFixed(1) + 's';
+                }, 100);
+            } else {
+                bar.textContent = msg;
+            }
         }
 
         let allResultData = []; // { fgtHost, switches[] }
