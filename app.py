@@ -9,7 +9,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 app = Flask(__name__, static_folder="static")
 
 
-def get_fortigate_session(host, token):
+def get_fortigate_session(host, token, port=443):
     """Create a requests.Session with connection pooling for FortiGate API calls."""
     s = requests.Session()
     s.headers.update({"Authorization": f"Bearer {token}"})
@@ -17,8 +17,9 @@ def get_fortigate_session(host, token):
     # Increase connection pool for parallel requests
     adapter = requests.adapters.HTTPAdapter(pool_connections=16, pool_maxsize=16)
     s.mount("https://", adapter)
+    port_suffix = f":{port}" if port != 443 else ""
     return {
-        "base_url": f"https://{host}/api/v2",
+        "base_url": f"https://{host}{port_suffix}/api/v2",
         "session": s,
     }
 
@@ -58,9 +59,9 @@ def fetch_tx_rx(session, params, switch_serial, port, transceiver_info):
         }
 
 
-def diagnose_single_host(host, token, vdom, progress_cb=None):
+def diagnose_single_host(host, token, vdom, port=443, progress_cb=None):
     """Diagnose a single FortiGate. Returns dict with switches or error."""
-    session = get_fortigate_session(host, token)
+    session = get_fortigate_session(host, token, port)
     params = {}
     if vdom:
         params["vdom"] = vdom
@@ -242,11 +243,12 @@ def diagnose():
     host = data.get("host", "").strip()
     token = data.get("token", "").strip()
     vdom = data.get("vdom", "root").strip()
+    port = int(data.get("port", 443))
 
     if not host or not token:
         return jsonify({"error": "Host und API-Token sind erforderlich."}), 400
 
-    result = diagnose_single_host(host, token, vdom)
+    result = diagnose_single_host(host, token, vdom, port)
 
     if "error" in result:
         return jsonify({"error": result["error"]}), 502
@@ -272,6 +274,7 @@ def diagnose_multi():
                 h.get("host", "").strip(),
                 h.get("token", "").strip(),
                 h.get("vdom", "root").strip(),
+                int(h.get("port", 443)),
             ): h
             for h in host_list
             if h.get("host", "").strip() and h.get("token", "").strip()
@@ -310,6 +313,7 @@ def diagnose_stream():
                 h.get("host", "").strip(),
                 h.get("token", "").strip(),
                 h.get("vdom", "root").strip(),
+                int(h.get("port", 443)),
                 progress_cb=progress_cb,
             )
             progress_queue.put({"type": "result", "data": result})
@@ -356,11 +360,12 @@ def ping_host():
 
     data = request.get_json()
     host = data.get("host", "").strip()
+    port = int(data.get("port", 443))
 
     if not host:
         return jsonify({"error": "Kein Host angegeben."}), 400
 
-    result = {"host": host, "dns": None, "ip": None, "ping": None, "https": None}
+    result = {"host": host, "port": port, "dns": None, "ip": None, "ping": None, "https": None}
 
     # Step 1: DNS resolution
     try:
@@ -410,12 +415,12 @@ def ping_host():
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(3)
         start = time.time()
-        sock.connect((result["ip"], 443))
+        sock.connect((result["ip"], port))
         elapsed = round((time.time() - start) * 1000)
         sock.close()
         result["https"] = {"ok": True, "rtt_ms": elapsed}
     except Exception:
-        result["https"] = {"ok": False, "error": "HTTPS-Port 443 nicht erreichbar"}
+        result["https"] = {"ok": False, "error": f"Port {port} nicht erreichbar"}
 
     return jsonify(result)
 

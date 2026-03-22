@@ -817,6 +817,7 @@
                         <tr>
                             <th class="col-check"><input type="checkbox" id="selectAll" onchange="toggleSelectAll(this)" /></th>
                             <th>Host</th>
+                            <th>Port</th>
                             <th>API Token</th>
                             <th>VDOM</th>
                             <th class="col-actions">Aktionen</th>
@@ -900,9 +901,9 @@
 
         // --- Host Management ---
 
-        function addHostRow(host = '', token = '', vdom = 'root') {
+        function addHostRow(host = '', token = '', vdom = 'root', port = '443') {
             syncHostValues();
-            hosts.push({ id: ++hostIdCounter, host, token, vdom });
+            hosts.push({ id: ++hostIdCounter, host, token, vdom, port });
             renderHostTable();
         }
 
@@ -917,6 +918,7 @@
                 const row = document.querySelector(`tr[data-id="${h.id}"]`);
                 if (row) {
                     h.host = row.querySelector('.inp-host').value.trim();
+                    h.port = row.querySelector('.inp-port').value.trim() || '443';
                     h.token = row.querySelector('.inp-token').value.trim();
                     h.vdom = row.querySelector('.inp-vdom').value.trim() || 'root';
                 }
@@ -940,6 +942,7 @@
                 tr.innerHTML = `
                     <td class="col-check"><input type="checkbox" class="host-check" /></td>
                     <td><input type="text" class="inp-host" value="${escAttr(h.host)}" placeholder="192.168.1.1" /></td>
+                    <td><input type="number" class="inp-port" value="${escAttr(h.port)}" placeholder="443" style="max-width:80px" min="1" max="65535" /></td>
                     <td><input type="password" class="inp-token" value="${escAttr(h.token)}" placeholder="API Token" /></td>
                     <td><input type="text" class="inp-vdom" value="${escAttr(h.vdom)}" placeholder="root" style="max-width:120px" /></td>
                     <td class="col-actions">
@@ -996,7 +999,8 @@
                     const host = parts[0];
                     const token = parts[1];
                     const vdom = parts[2] || 'root';
-                    hosts.push({ id: ++hostIdCounter, host, token, vdom });
+                    const port = parts[3] || '443';
+                    hosts.push({ id: ++hostIdCounter, host, token, vdom, port });
                     added++;
                 }
             }
@@ -1012,9 +1016,9 @@
                 return;
             }
 
-            let csv = 'host;token;vdom\n';
+            let csv = 'host;token;vdom;port\n';
             hosts.forEach(h => {
-                csv += `${csvEscape(h.host)};${csvEscape(h.token)};${csvEscape(h.vdom)}\n`;
+                csv += `${csvEscape(h.host)};${csvEscape(h.token)};${csvEscape(h.vdom)};${csvEscape(h.port || '443')}\n`;
             });
 
             const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -1041,7 +1045,7 @@
         function saveHosts() {
             getHostValues();
             localStorage.setItem(STORAGE_KEY, JSON.stringify(hosts.map(h => ({
-                host: h.host, token: h.token, vdom: h.vdom
+                host: h.host, token: h.token, vdom: h.vdom, port: h.port || '443'
             }))));
             showStatus(`${hosts.length} Host(s) gespeichert.`, 'success');
         }
@@ -1059,7 +1063,8 @@
                     id: ++hostIdCounter,
                     host: h.host || '',
                     token: h.token || '',
-                    vdom: h.vdom || 'root'
+                    vdom: h.vdom || 'root',
+                    port: h.port || '443'
                 }));
                 renderHostTable();
                 showStatus(`${hosts.length} Host(s) geladen.`, 'success');
@@ -1077,6 +1082,8 @@
                 showStatus('Host ist erforderlich.', 'error');
                 return;
             }
+
+            const pingPort = parseInt(host.port) || 443;
 
             // Create modal
             const overlay = document.createElement('div');
@@ -1103,7 +1110,7 @@
                         </div>
                         <div class="ping-check loading" id="ping-https">
                             <span class="ping-status">\u23F3</span>
-                            <span class="ping-label">HTTPS</span>
+                            <span class="ping-label">TCP:${pingPort}</span>
                             <span class="ping-value">Warte...</span>
                             <span class="ping-rtt"></span>
                         </div>
@@ -1116,7 +1123,7 @@
                 const resp = await fetch('/api/ping', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ host: host.host })
+                    body: JSON.stringify({ host: host.host, port: pingPort })
                 });
                 const data = await resp.json();
 
@@ -1154,7 +1161,7 @@
                 if (data.https?.ok) {
                     httpsEl.className = 'ping-check';
                     httpsEl.querySelector('.ping-status').textContent = '\u2705';
-                    httpsEl.querySelector('.ping-value').textContent = 'Port 443 offen';
+                    httpsEl.querySelector('.ping-value').textContent = `Port ${pingPort} offen`;
                     httpsEl.querySelector('.ping-rtt').textContent = data.https.rtt_ms + ' ms';
                 } else if (data.https) {
                     httpsEl.className = 'ping-check fail';
@@ -1230,7 +1237,7 @@
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        hosts: hostList.map(h => ({ host: h.host, token: h.token, vdom: h.vdom }))
+                        hosts: hostList.map(h => ({ host: h.host, token: h.token, vdom: h.vdom, port: parseInt(h.port) || 443 }))
                     })
                 });
 
@@ -2021,7 +2028,8 @@
                         id: ++hostIdCounter,
                         host: h.host || '',
                         token: h.token || '',
-                        vdom: h.vdom || 'root'
+                        vdom: h.vdom || 'root',
+                        port: h.port || '443'
                     }));
                 } catch (e) { /* ignore */ }
             }
