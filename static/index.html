@@ -158,7 +158,8 @@
         }
 
         .host-table input[type="text"],
-        .host-table input[type="password"] {
+        .host-table input[type="password"],
+        .host-table input[type="number"] {
             background: var(--bg);
             border: 1px solid var(--border);
             border-radius: 4px;
@@ -168,6 +169,17 @@
             outline: none;
             width: 100%;
             min-width: 100px;
+        }
+
+        .host-table input[type="number"] {
+            min-width: 60px;
+            -moz-appearance: textfield;
+        }
+
+        .host-table input[type="number"]::-webkit-outer-spin-button,
+        .host-table input[type="number"]::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
         }
 
         .host-table input:focus { border-color: var(--accent); }
