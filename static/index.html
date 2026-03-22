@@ -556,6 +556,159 @@
         .port-row-hidden { display: none !important; }
         .switch-card-hidden { display: none !important; }
 
+        /* Error Cards */
+        .error-card {
+            background: var(--surface);
+            border: 1px solid var(--red);
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            overflow: hidden;
+        }
+
+        .error-card-header {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 1rem 1.25rem;
+            background: rgba(239, 68, 68, 0.08);
+            border-bottom: 1px solid rgba(239, 68, 68, 0.2);
+        }
+
+        .error-icon {
+            font-size: 1.5rem;
+            line-height: 1;
+            flex-shrink: 0;
+        }
+
+        .error-card-header .error-host {
+            font-weight: 600;
+            font-size: 1rem;
+            color: var(--red);
+        }
+
+        .error-card-header .error-type-badge {
+            margin-left: auto;
+            padding: 0.2rem 0.6rem;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            background: rgba(239, 68, 68, 0.2);
+            color: var(--red);
+        }
+
+        .error-card-body {
+            padding: 1rem 1.25rem;
+        }
+
+        .error-message {
+            color: var(--text);
+            font-size: 0.9rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .error-hint {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.5rem;
+            padding: 0.6rem 0.75rem;
+            background: rgba(59, 130, 246, 0.08);
+            border: 1px solid rgba(59, 130, 246, 0.2);
+            border-radius: 6px;
+            color: var(--accent);
+            font-size: 0.8rem;
+            line-height: 1.4;
+        }
+
+        .error-hint-icon {
+            flex-shrink: 0;
+            margin-top: 1px;
+        }
+
+        /* Ping Result Modal */
+        .ping-overlay {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+            display: flex; align-items: center; justify-content: center;
+            z-index: 1000; animation: fadeIn 0.15s ease;
+        }
+
+        .ping-modal {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 1.5rem;
+            width: 420px;
+            max-width: 90vw;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+        }
+
+        .ping-modal h3 {
+            font-size: 1rem;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .ping-modal .ping-close {
+            margin-left: auto;
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 1.2rem;
+            padding: 0.25rem;
+        }
+
+        .ping-modal .ping-close:hover { color: var(--text); }
+
+        .ping-checks {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .ping-check {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.6rem 0.75rem;
+            background: var(--bg);
+            border-radius: 6px;
+            font-size: 0.85rem;
+        }
+
+        .ping-check .ping-status {
+            width: 24px;
+            text-align: center;
+            font-size: 1rem;
+            flex-shrink: 0;
+        }
+
+        .ping-check .ping-label {
+            color: var(--text-muted);
+            min-width: 60px;
+        }
+
+        .ping-check .ping-value {
+            color: var(--text);
+            flex: 1;
+        }
+
+        .ping-check .ping-rtt {
+            color: var(--green);
+            font-weight: 600;
+            font-size: 0.8rem;
+            margin-left: auto;
+        }
+
+        .ping-check.fail .ping-value { color: var(--red); }
+        .ping-check.fail .ping-rtt { display: none; }
+        .ping-check.loading { opacity: 0.6; }
+
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
         .port-table th.sortable {
             cursor: pointer;
             user-select: none;
@@ -792,6 +945,7 @@
                     <td class="col-actions">
                         <div class="action-btns">
                             <button class="btn btn-sm" onclick="diagnoseSingle(${h.id})">Abfragen</button>
+                            <button class="btn btn-sm btn-secondary" onclick="pingHost(${h.id})" title="Host-Erreichbarkeit prüfen">Ping</button>
                             <button class="btn btn-sm btn-danger" onclick="removeHost(${h.id})">&#10005;</button>
                         </div>
                     </td>
@@ -916,6 +1070,111 @@
 
         // --- Diagnose ---
 
+        async function pingHost(id) {
+            syncHostValues();
+            const host = hosts.find(h => h.id === id);
+            if (!host || !host.host) {
+                showStatus('Host ist erforderlich.', 'error');
+                return;
+            }
+
+            // Create modal
+            const overlay = document.createElement('div');
+            overlay.className = 'ping-overlay';
+            overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+            overlay.innerHTML = `
+                <div class="ping-modal">
+                    <h3>
+                        <span>\uD83D\uDCE1</span> Ping: ${esc(host.host)}
+                        <button class="ping-close" onclick="this.closest('.ping-overlay').remove()">\u2715</button>
+                    </h3>
+                    <div class="ping-checks">
+                        <div class="ping-check loading" id="ping-dns">
+                            <span class="ping-status">\u23F3</span>
+                            <span class="ping-label">DNS</span>
+                            <span class="ping-value">Auflösung...</span>
+                            <span class="ping-rtt"></span>
+                        </div>
+                        <div class="ping-check loading" id="ping-icmp">
+                            <span class="ping-status">\u23F3</span>
+                            <span class="ping-label">ICMP</span>
+                            <span class="ping-value">Warte...</span>
+                            <span class="ping-rtt"></span>
+                        </div>
+                        <div class="ping-check loading" id="ping-https">
+                            <span class="ping-status">\u23F3</span>
+                            <span class="ping-label">HTTPS</span>
+                            <span class="ping-value">Warte...</span>
+                            <span class="ping-rtt"></span>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+
+            try {
+                const resp = await fetch('/api/ping', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ host: host.host })
+                });
+                const data = await resp.json();
+
+                // DNS
+                const dnsEl = document.getElementById('ping-dns');
+                if (data.dns?.ok) {
+                    dnsEl.className = 'ping-check';
+                    dnsEl.querySelector('.ping-status').textContent = '\u2705';
+                    dnsEl.querySelector('.ping-value').textContent = data.dns.ip;
+                } else {
+                    dnsEl.className = 'ping-check fail';
+                    dnsEl.querySelector('.ping-status').textContent = '\u274C';
+                    dnsEl.querySelector('.ping-value').textContent = data.dns?.error || 'Fehlgeschlagen';
+                }
+
+                // ICMP
+                const icmpEl = document.getElementById('ping-icmp');
+                if (data.ping?.ok) {
+                    icmpEl.className = 'ping-check';
+                    icmpEl.querySelector('.ping-status').textContent = '\u2705';
+                    icmpEl.querySelector('.ping-value').textContent = 'Erreichbar';
+                    icmpEl.querySelector('.ping-rtt').textContent = data.ping.rtt_ms + ' ms';
+                } else if (data.ping) {
+                    icmpEl.className = 'ping-check fail';
+                    icmpEl.querySelector('.ping-status').textContent = '\u274C';
+                    icmpEl.querySelector('.ping-value').textContent = data.ping.error;
+                } else {
+                    icmpEl.className = 'ping-check fail';
+                    icmpEl.querySelector('.ping-status').textContent = '\u2796';
+                    icmpEl.querySelector('.ping-value').textContent = 'Übersprungen (DNS fehlgeschlagen)';
+                }
+
+                // HTTPS
+                const httpsEl = document.getElementById('ping-https');
+                if (data.https?.ok) {
+                    httpsEl.className = 'ping-check';
+                    httpsEl.querySelector('.ping-status').textContent = '\u2705';
+                    httpsEl.querySelector('.ping-value').textContent = 'Port 443 offen';
+                    httpsEl.querySelector('.ping-rtt').textContent = data.https.rtt_ms + ' ms';
+                } else if (data.https) {
+                    httpsEl.className = 'ping-check fail';
+                    httpsEl.querySelector('.ping-status').textContent = '\u274C';
+                    httpsEl.querySelector('.ping-value').textContent = data.https.error;
+                } else {
+                    httpsEl.className = 'ping-check fail';
+                    httpsEl.querySelector('.ping-status').textContent = '\u2796';
+                    httpsEl.querySelector('.ping-value').textContent = 'Übersprungen';
+                }
+            } catch (e) {
+                overlay.querySelector('.ping-checks').innerHTML = `
+                    <div class="ping-check fail">
+                        <span class="ping-status">\u274C</span>
+                        <span class="ping-value">Netzwerkfehler: ${esc(e.message)}</span>
+                    </div>
+                `;
+            }
+        }
+
         async function diagnoseSingle(id) {
             getHostValues();
             const host = hosts.find(h => h.id === id);
@@ -1003,14 +1262,15 @@
                         } else if (msg.type === 'result') {
                             const result = msg.data;
                             if (result.error) {
-                                appendError(resultsDiv, result.host, result.error);
+                                appendError(resultsDiv, result.host, result.error, result.error_type, result.hint);
                                 errors++;
                             } else if (result.switches && result.switches.length > 0) {
                                 totalSwitches += result.switches.length;
                                 totalPorts += result.switches.reduce((s, sw) => s + sw.ports.length, 0);
                                 renderResults(result.switches, result.host, resultsDiv);
                             } else {
-                                appendError(resultsDiv, result.host, 'Keine managed Switches mit Fiber-Ports gefunden.');
+                                appendError(resultsDiv, result.host, 'Keine managed Switches mit Fiber-Ports gefunden.', 'info',
+                                    'Sind Switches via FortiLink verbunden? Haben die Switches Fiber-Ports mit SFP-Modulen?');
                             }
                         } else if (msg.type === 'complete') {
                             break;
@@ -1046,15 +1306,52 @@
             if (statusText) statusText.innerHTML = lines.join('<br>');
         }
 
-        function appendError(container, host, message) {
+        const errorTypeIcons = {
+            timeout: '\u23F1\uFE0F',
+            dns: '\uD83C\uDF10',
+            refused: '\uD83D\uDEAB',
+            ssl: '\uD83D\uDD12',
+            connection: '\uD83D\uDD0C',
+            auth: '\uD83D\uDD11',
+            permission: '\uD83D\uDEE1\uFE0F',
+            api: '\u26A0\uFE0F',
+            server: '\uD83D\uDDA5\uFE0F',
+            unknown: '\u2753',
+            info: '\u2139\uFE0F',
+        };
+
+        const errorTypeLabels = {
+            timeout: 'Timeout',
+            dns: 'DNS',
+            refused: 'Verbindung',
+            ssl: 'SSL/TLS',
+            connection: 'Netzwerk',
+            auth: 'Authentifizierung',
+            permission: 'Berechtigung',
+            api: 'API',
+            server: 'Server',
+            unknown: 'Fehler',
+            info: 'Info',
+        };
+
+        function appendError(container, host, message, errorType, hint) {
+            const type = errorType || 'unknown';
+            const icon = errorTypeIcons[type] || errorTypeIcons.unknown;
+            const label = errorTypeLabels[type] || errorTypeLabels.unknown;
             const div = document.createElement('div');
-            div.className = 'switch-card';
+            div.className = 'error-card';
             div.innerHTML = `
-                <div class="switch-header" style="cursor:default">
-                    <div class="switch-info">
-                        <div class="switch-name" style="color:var(--red)">${esc(host)}</div>
-                        <div class="switch-meta" style="color:var(--red)">${esc(message)}</div>
-                    </div>
+                <div class="error-card-header">
+                    <span class="error-icon">${icon}</span>
+                    <span class="error-host">${esc(host)}</span>
+                    <span class="error-type-badge">${esc(label)}</span>
+                </div>
+                <div class="error-card-body">
+                    <div class="error-message">${esc(message)}</div>
+                    ${hint ? `<div class="error-hint">
+                        <span class="error-hint-icon">\uD83D\uDCA1</span>
+                        <span>${esc(hint)}</span>
+                    </div>` : ''}
                 </div>
             `;
             container.appendChild(div);

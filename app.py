@@ -174,17 +174,60 @@ def diagnose_single_host(host, token, vdom, progress_cb=None):
         emit("done", f"{len(results)} Switch(es) mit {total_ports} Fiber-Port(s)")
         return {"host": host, "switches": results}
 
-    except requests.exceptions.ConnectionError:
-        return {"host": host, "error": f"Verbindung zu {host} fehlgeschlagen. Host erreichbar?"}
+    except requests.exceptions.ConnectTimeout:
+        return {"host": host, "error": "Zeitüberschreitung beim Verbindungsaufbau.",
+                "error_type": "timeout",
+                "hint": "Host antwortet nicht rechtzeitig. Firewall-Regeln und Erreichbarkeit prüfen."}
+    except requests.exceptions.ReadTimeout:
+        return {"host": host, "error": "Zeitüberschreitung beim Lesen der API-Antwort.",
+                "error_type": "timeout",
+                "hint": "FortiGate antwortet zu langsam. Evtl. hohe Auslastung oder zu viele Switches."}
+    except requests.exceptions.ConnectionError as e:
+        err_str = str(e).lower()
+        if "name or service not known" in err_str or "getaddrinfo failed" in err_str or "nodename nor servname" in err_str:
+            return {"host": host, "error": f"DNS-Auflösung für '{host}' fehlgeschlagen.",
+                    "error_type": "dns",
+                    "hint": "Hostname prüfen. Ist der DNS-Server erreichbar?"}
+        if "connection refused" in err_str or "errno 111" in err_str or "errno 10061" in err_str:
+            return {"host": host, "error": f"Verbindung zu {host} abgelehnt.",
+                    "error_type": "refused",
+                    "hint": "HTTPS-Zugang (Port 443) auf der FortiGate aktiviert? Läuft der Management-Dienst?"}
+        if "ssl" in err_str or "certificate" in err_str:
+            return {"host": host, "error": f"SSL/TLS-Fehler bei Verbindung zu {host}.",
+                    "error_type": "ssl",
+                    "hint": "Zertifikatsproblem. Evtl. selbstsigniertes Zertifikat oder TLS-Version inkompatibel."}
+        return {"host": host, "error": f"Verbindung zu {host} fehlgeschlagen.",
+                "error_type": "connection",
+                "hint": "Host erreichbar? Netzwerkverbindung und Firewall-Regeln prüfen."}
     except requests.exceptions.HTTPError as e:
         status_code = e.response.status_code if e.response is not None else 0
         if status_code == 401:
-            return {"host": host, "error": "Authentifizierung fehlgeschlagen. API-Token prüfen."}
+            return {"host": host, "error": "Authentifizierung fehlgeschlagen (HTTP 401).",
+                    "error_type": "auth",
+                    "hint": "API-Token ungültig oder abgelaufen. Neuen Token in der FortiGate erstellen."}
         if status_code == 403:
-            return {"host": host, "error": "Zugriff verweigert. Berechtigungen des API-Tokens prüfen."}
-        return {"host": host, "error": f"FortiGate API Fehler: {e}"}
+            return {"host": host, "error": "Zugriff verweigert (HTTP 403).",
+                    "error_type": "permission",
+                    "hint": "API-Token hat keine Berechtigung für switch-controller. Admin-Profil prüfen (Access Group: wifi)."}
+        if status_code == 404:
+            return {"host": host, "error": "API-Endpunkt nicht gefunden (HTTP 404).",
+                    "error_type": "api",
+                    "hint": "FortiOS-Version zu alt? Mindestens FortiOS 7.0 erforderlich. VDOM-Name korrekt?"}
+        if status_code == 424:
+            return {"host": host, "error": "Abhängigkeit fehlgeschlagen (HTTP 424).",
+                    "error_type": "api",
+                    "hint": "FortiLink ist möglicherweise nicht konfiguriert oder kein Switch verbunden."}
+        if status_code == 500:
+            return {"host": host, "error": "Interner FortiGate-Fehler (HTTP 500).",
+                    "error_type": "server",
+                    "hint": "FortiGate hat einen internen Fehler. Neustart oder CLI-Diagnose erforderlich."}
+        return {"host": host, "error": f"FortiGate API Fehler (HTTP {status_code}).",
+                "error_type": "api",
+                "hint": f"Unerwarteter HTTP-Statuscode {status_code}. FortiGate-Logs prüfen."}
     except Exception as e:
-        return {"host": host, "error": f"Unerwarteter Fehler: {e}"}
+        return {"host": host, "error": f"Unerwarteter Fehler: {e}",
+                "error_type": "unknown",
+                "hint": "Bitte Eingaben prüfen und erneut versuchen."}
 
 
 @app.route("/")
@@ -301,6 +344,78 @@ def diagnose_stream():
 
     return Response(generate(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.route("/api/ping", methods=["POST"])
+def ping_host():
+    """Ping a host and return reachability info."""
+    import subprocess
+    import platform
+    import socket
+    import time
+
+    data = request.get_json()
+    host = data.get("host", "").strip()
+
+    if not host:
+        return jsonify({"error": "Kein Host angegeben."}), 400
+
+    result = {"host": host, "dns": None, "ip": None, "ping": None, "https": None}
+
+    # Step 1: DNS resolution
+    try:
+        ip = socket.gethostbyname(host)
+        result["dns"] = {"ok": True, "ip": ip}
+        result["ip"] = ip
+    except socket.gaierror:
+        result["dns"] = {"ok": False, "error": "DNS-Auflösung fehlgeschlagen"}
+        return jsonify(result)
+
+    # Step 2: ICMP Ping
+    try:
+        param = "-n" if platform.system().lower() == "windows" else "-c"
+        timeout_param = "-w" if platform.system().lower() == "windows" else "-W"
+        timeout_val = "2000" if platform.system().lower() == "windows" else "2"
+        cmd = ["ping", param, "3", timeout_param, timeout_val, host]
+        start = time.time()
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        elapsed = round((time.time() - start) * 1000)
+
+        if proc.returncode == 0:
+            # Extract avg RTT from output
+            import re
+            output = proc.stdout
+            # Windows: "Minimum = 1ms, Maximum = 2ms, Mittelwert = 1ms"
+            # Linux: "rtt min/avg/max/mdev = 0.5/1.0/1.5/0.3 ms"
+            avg = None
+            m = re.search(r"(?:Average|Mittelwert|avg)[^=]*=\s*(\d+)", output)
+            if m:
+                avg = int(m.group(1))
+            else:
+                m = re.search(r"min/avg/max/\S+\s*=\s*[\d.]+/([\d.]+)/", output)
+                if m:
+                    avg = round(float(m.group(1)))
+            result["ping"] = {"ok": True, "rtt_ms": avg or elapsed // 3}
+        else:
+            result["ping"] = {"ok": False, "error": "Host antwortet nicht auf Ping (ICMP)"}
+    except subprocess.TimeoutExpired:
+        result["ping"] = {"ok": False, "error": "Ping Timeout"}
+    except Exception as e:
+        result["ping"] = {"ok": False, "error": str(e)}
+
+    # Step 3: HTTPS port check
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(3)
+        start = time.time()
+        sock.connect((result["ip"], 443))
+        elapsed = round((time.time() - start) * 1000)
+        sock.close()
+        result["https"] = {"ok": True, "rtt_ms": elapsed}
+    except Exception:
+        result["https"] = {"ok": False, "error": "HTTPS-Port 443 nicht erreichbar"}
+
+    return jsonify(result)
 
 
 if __name__ == "__main__":
