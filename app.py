@@ -400,6 +400,8 @@ def ping_host():
             result["ping"] = {"ok": False, "error": "Host antwortet nicht auf Ping (ICMP)"}
     except subprocess.TimeoutExpired:
         result["ping"] = {"ok": False, "error": "Ping Timeout"}
+    except FileNotFoundError:
+        result["ping"] = {"ok": False, "error": "Ping nicht verfügbar (Kommando nicht installiert)"}
     except Exception as e:
         result["ping"] = {"ok": False, "error": str(e)}
 

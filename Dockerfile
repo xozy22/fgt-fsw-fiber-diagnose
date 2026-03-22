@@ -5,7 +5,10 @@ LABEL description="FortiLink FortiSwitch Fiber Diagnose Tool"
 
 WORKDIR /app
 
-# Install dependencies first (layer caching)
+# Install system dependencies (ping for host connectivity check)
+RUN apt-get update && apt-get install -y --no-install-recommends iputils-ping && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies first (layer caching)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt gunicorn
 
